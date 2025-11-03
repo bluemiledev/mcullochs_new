@@ -69,7 +69,8 @@
 
 /* Leaflet map customizations */
 :global(.leaflet-container) {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+    Oxygen, Ubuntu, Cantarell, 'Helvetica Neue', Arial, sans-serif;
 }
 
 :global(.leaflet-popup-content-wrapper) {

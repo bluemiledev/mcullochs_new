@@ -2,6 +2,7 @@
   "name": "react-chart-app",
   "version": "1.0.0",
   "description": "A professional React application with chart functionality",
+  "homepage": ".",
   "main": "index.js",
   "scripts": {
     "start": "react-scripts start",
@@ -28,7 +29,8 @@
     "react-leaflet": "^4.2.1",
     "react-query": "^3.39.3",
     "react-router-dom": "^6.8.0",
-    "react-scripts": "5.0.1"
+    "react-scripts": "5.0.1",
+    "recharts": "^2.10.3"
   },
   "devDependencies": {
     "@types/node": "^18.15.0",
@@ -70,5 +72,7 @@
     }
   }
 }
+
+
 
 

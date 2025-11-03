@@ -3,6 +3,8 @@ import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import styles from './MapComponent.module.css';
+import { useEffect, useMemo, useState } from 'react';
+import { useTimeContext } from '../context/TimeContext';
 
 // Fix for default markers in react-leaflet
 delete (L.Icon.Default.prototype as unknown as { _getIconUrl: unknown })._getIconUrl;
@@ -25,31 +27,54 @@ const vehicleIcon = new L.Icon({
   popupAnchor: [0, -12],
 });
 
+type GpsPoint = { time: number; lat: number; lng: number };
+
 const MapComponent: React.FC = () => {
-  // Brisbane coordinates (center of Australia's east coast)
+  // Australia (Brisbane area)
   const center: [number, number] = [-27.4698, 153.0251];
-  
-  // Vehicle locations around Brisbane area
-  const vehicleLocations = [
-    {
-      id: '6363298',
-      name: '6363298 (2131DQW12)',
-      position: [-27.4698, 153.0251] as [number, number],
-      status: 'active'
-    },
-    {
-      id: '6363299',
-      name: '6363299 (2131DQW13)',
-      position: [-27.3804, 153.0314] as [number, number],
-      status: 'active'
-    },
-    {
-      id: '6363300',
-      name: '6363300 (2131DQW14)',
-      position: [-27.5592, 153.0188] as [number, number],
-      status: 'maintenance'
+  const { selectedTime } = useTimeContext();
+  const [gpsPoints, setGpsPoints] = useState<GpsPoint[]>([]);
+
+  useEffect(() => {
+    const loadGps = async () => {
+      try {
+        const res = await fetch(`/data/telemetry.json`, { headers: { 'Accept': 'application/json' }, cache: 'no-cache' });
+        const json = await res.json();
+        const times: number[] = Array.isArray(json?.times) ? json.times : [];
+        const base = new Date(times?.[0] ?? Date.now());
+        base.setHours(0, 0, 0, 0);
+        const parseHMS = (hms: string) => {
+          const [hh, mm, ss] = String(hms).split(':').map((n: string) => Number(n));
+          return base.getTime() + hh * 3600000 + mm * 60000 + ss * 1000;
+        };
+        const pts: GpsPoint[] = Array.isArray(json?.gpsPerSecond)
+          ? json.gpsPerSecond.map((p: any) => ({ time: parseHMS(p.time), lat: Number(p.lat), lng: Number(p.lng) }))
+          : [];
+        pts.sort((a, b) => a.time - b.time);
+        setGpsPoints(pts);
+      } catch (e) {
+        setGpsPoints([]);
+      }
+    };
+    loadGps();
+  }, []);
+
+  const currentPosition = useMemo<[number, number] | null>(() => {
+    if (!selectedTime || gpsPoints.length === 0) return null;
+    const t = selectedTime.getTime();
+    // binary search nearest
+    let lo = 0, hi = gpsPoints.length - 1;
+    while (lo < hi) {
+      const mid = Math.floor((lo + hi) / 2);
+      if (gpsPoints[mid].time < t) lo = mid + 1; else hi = mid;
     }
-  ];
+    const idx = lo;
+    const prev = gpsPoints[Math.max(0, idx - 1)];
+    const next = gpsPoints[Math.min(gpsPoints.length - 1, idx)];
+    const pick = Math.abs((prev?.time ?? Infinity) - t) <= Math.abs((next?.time ?? Infinity) - t) ? prev : next;
+    if (!pick) return null;
+    return [pick.lat, pick.lng];
+  }, [selectedTime, gpsPoints]);
 
   return (
     <div className={styles.mapContainer}>
@@ -74,25 +99,17 @@ const MapComponent: React.FC = () => {
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
-        
-        {vehicleLocations.map((vehicle) => (
-          <Marker
-            key={vehicle.id}
-            position={vehicle.position}
-            icon={vehicleIcon}
-          >
+        {currentPosition && (
+          <Marker position={currentPosition} icon={vehicleIcon}>
             <Popup>
               <div className={styles.popupContent}>
-                <h4>{vehicle.name}</h4>
-                <p>Status: <span className={vehicle.status === 'active' ? styles.activeStatus : styles.maintenanceStatus}>
-                  {vehicle.status}
-                </span></p>
-                <p>Location: Brisbane Area</p>
-                <p>Last Update: {new Date().toLocaleTimeString()}</p>
+                <h4>Vehicle</h4>
+                <p>Location: Australia (Brisbane area)</p>
+                <p>Time: {selectedTime ? new Date(selectedTime).toLocaleTimeString() : '—'}</p>
               </div>
             </Popup>
           </Marker>
-        ))}
+        )}
       </MapContainer>
     </div>
   );
