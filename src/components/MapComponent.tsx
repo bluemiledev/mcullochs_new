@@ -1,5 +1,5 @@
 import React from 'react';
-import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, useMap, Polyline } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import styles from './MapComponent.module.css';
@@ -66,19 +66,53 @@ const MapComponent: React.FC = () => {
           const [hh, mm, ss] = String(hms).split(':').map((n: string) => Number(n));
           return base.getTime() + hh * 3600000 + mm * 60000 + ss * 1000;
         };
-        const arr: any[] = Array.isArray(payload?.gpsPerSecond) ? payload.gpsPerSecond : [];
+        const arr: any[] = Array.isArray(payload?.gpsPerSecond)
+          ? payload.gpsPerSecond
+          : Array.isArray(payload?.gps_per_second)
+          ? payload.gps_per_second
+          : Array.isArray(payload?.gps)
+          ? payload.gps
+          : Array.isArray(payload?.locations)
+          ? payload.locations
+          : [];
+        const toNumber = (val: any): number => {
+          if (typeof val === 'number') return val;
+          if (typeof val === 'string') {
+            const cleaned = val.replace(/[^0-9+\-\.]/g, '').replace('−', '-');
+            const n = Number(cleaned);
+            if (Number.isFinite(n)) return n;
+          }
+          return NaN;
+        };
+        const getLat = (p: any): number => {
+          const v = p.lat ?? p.Lat ?? p.LAT ?? p.latitude ?? p.Latitude ?? p.gpsLat ?? p.lat_val ?? p.latE7;
+          let n = toNumber(v);
+          if (!Number.isFinite(n) && Array.isArray(p.coordinates)) n = toNumber(p.coordinates[1]);
+          if (!Number.isFinite(n) && Array.isArray(p.coord)) n = toNumber(p.coord[1]);
+          if (Math.abs(n) > 90 && Math.abs(n) > 1000) n = n / 1e7; // latE7
+          return n;
+        };
+        const getLng = (p: any): number => {
+          const v = p.lng ?? p.Lng ?? p.LNG ?? p.lon ?? p.long ?? p.Long ?? p.longitude ?? p.Longitude ?? p.gpsLng ?? p.lng_val ?? p.lngE7;
+          let n = toNumber(v);
+          if (!Number.isFinite(n) && Array.isArray(p.coordinates)) n = toNumber(p.coordinates[0]);
+          if (!Number.isFinite(n) && Array.isArray(p.coord)) n = toNumber(p.coord[0]);
+          if (Math.abs(n) > 180 && Math.abs(n) > 1000) n = n / 1e7; // lngE7
+          return n;
+        };
         const pts: GpsPoint[] = arr.map((p: any) => ({
           time: (() => {
-            const ts = p.timestamp ?? p.timeStamp ?? p.ts ?? null;
+            const ts = p.timestamp ?? p.timeStamp ?? p.ts ?? p.epoch ?? null;
             if (ts != null) {
               const n = Number(ts);
               if (Number.isFinite(n)) return n < 1e12 ? n * 1000 : n;
             }
-            return parseHMS(String(p.time ?? p.Time ?? p.TIME ?? '00:00:00'));
+            return parseHMS(String(p.time ?? p.Time ?? p.TIME ?? p.hms ?? '00:00:00'));
           })(),
-          lat: Number(p.lat ?? p.latitude ?? p.Latitude ?? p.Lat ?? p.LAT),
-          lng: Number(p.lng ?? p.lon ?? p.longitude ?? p.Longitude ?? p.Lon ?? p.LON)
-        })).filter(p => Number.isFinite(p.lat) && Number.isFinite(p.lng));
+          lat: getLat(p),
+          lng: getLng(p)
+        }))
+          .filter(p => Number.isFinite(p.lat) && Number.isFinite(p.lng));
         pts.sort((a, b) => a.time - b.time);
         setGpsPoints(pts);
       } catch (e) {
@@ -89,8 +123,8 @@ const MapComponent: React.FC = () => {
   }, []);
 
   const currentPosition = useMemo<[number, number] | null>(() => {
-    if (!selectedTime || gpsPoints.length === 0) return null;
-    const t = selectedTime.getTime();
+    if (gpsPoints.length === 0) return null;
+    const t = selectedTime ? selectedTime.getTime() : Math.floor((gpsPoints[0].time + gpsPoints[gpsPoints.length - 1].time) / 2);
     let lo = 0, hi = gpsPoints.length - 1;
     while (lo < hi) {
       const mid = Math.floor((lo + hi) / 2);
@@ -103,6 +137,41 @@ const MapComponent: React.FC = () => {
     if (!pick) return null;
     return [pick.lat, pick.lng];
   }, [selectedTime, gpsPoints]);
+
+  const pathPositions = useMemo<[number, number][]>(() => {
+    return gpsPoints.map(p => [p.lat, p.lng] as [number, number]);
+  }, [gpsPoints]);
+
+  // Compute bearing (degrees) between two points
+  const bearingDeg = (a: { lat: number; lng: number }, b: { lat: number; lng: number }): number => {
+    const φ1 = (a.lat * Math.PI) / 180;
+    const φ2 = (b.lat * Math.PI) / 180;
+    const Δλ = ((b.lng - a.lng) * Math.PI) / 180;
+    const y = Math.sin(Δλ) * Math.cos(φ2);
+    const x = Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ);
+    const θ = Math.atan2(y, x);
+    return (θ * 180) / Math.PI;
+  };
+
+  const arrowMarkers = useMemo(() => {
+    if (gpsPoints.length < 2) return [] as Array<{ pos: [number, number]; icon: L.DivIcon }>;
+    const maxArrows = 20;
+    const step = Math.max(1, Math.floor(gpsPoints.length / maxArrows));
+    const arr: Array<{ pos: [number, number]; icon: L.DivIcon }> = [];
+    for (let i = step; i < gpsPoints.length; i += step) {
+      const prev = gpsPoints[i - 1];
+      const curr = gpsPoints[i];
+      const ang = bearingDeg(prev, curr);
+      const icon = L.divIcon({
+        className: '',
+        html: `<div style="transform: rotate(${ang}deg); width: 0; height: 0; border-left: 6px solid transparent; border-right: 6px solid transparent; border-top: 10px solid #2563eb; opacity: 0.9;"></div>`,
+        iconSize: [12, 12],
+        iconAnchor: [6, 6],
+      });
+      arr.push({ pos: [curr.lat, curr.lng], icon });
+    }
+    return arr;
+  }, [gpsPoints]);
 
   const Recenter: React.FC<{ position: [number, number] | null }> = ({ position }) => {
     const map = useMap();
@@ -137,6 +206,10 @@ const MapComponent: React.FC = () => {
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
+        {/* Draw the path using full gps track */}
+        {pathPositions.length >= 2 && (
+          <Polyline positions={pathPositions} pathOptions={{ color: '#2563eb', weight: 4, opacity: 0.8 }} />
+        )}
         <Recenter position={currentPosition} />
         {currentPosition && (
           <Marker position={currentPosition} icon={vehicleIcon}>
@@ -148,6 +221,33 @@ const MapComponent: React.FC = () => {
               </div>
             </Popup>
           </Marker>
+        )}
+        {/* Direction arrows along the route */}
+        {arrowMarkers.map((m, idx) => (
+          <Marker key={`arr-${idx}`} position={m.pos} icon={m.icon} />
+        ))}
+        {/* Start and end markers for context */}
+        {pathPositions.length >= 2 && (
+          <>
+            <Marker
+              position={pathPositions[0]}
+              icon={L.divIcon({
+                className: '',
+                html: '<div style="width:10px;height:10px;border-radius:50%;background:#10b981;border:2px solid #fff;box-shadow:0 1px 2px rgba(0,0,0,0.3);"></div>',
+                iconSize: [12, 12],
+                iconAnchor: [6, 6],
+              })}
+            />
+            <Marker
+              position={pathPositions[pathPositions.length - 1]}
+              icon={L.divIcon({
+                className: '',
+                html: '<div style="width:10px;height:10px;border-radius:50%;background:#ef4444;border:2px solid #fff;box-shadow:0 1px 2px rgba(0,0,0,0.3);"></div>',
+                iconSize: [12, 12],
+                iconAnchor: [6, 6],
+              })}
+            />
+          </>
         )}
       </MapContainer>
     </div>

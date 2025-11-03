@@ -38,6 +38,7 @@ const VehicleDashboard: React.FC = () => {
   const [selectionStart, setSelectionStart] = useState<Date | null>(null);
   const [selectionEnd, setSelectionEnd] = useState<Date | null>(null);
   const [crosshairActive, setCrosshairActive] = useState<boolean>(false);
+  const [loading, setLoading] = useState<boolean>(true);
 
   // Generate realistic vehicle data patterns
   const generateVehicleData = useCallback((): { analogMetrics: VehicleMetric[]; digitalChart: DigitalStatusChart } => {
@@ -214,6 +215,7 @@ const VehicleDashboard: React.FC = () => {
   useEffect(() => {
     const load = async () => {
       try {
+        setLoading(true);
         // Prefer external API, fall back to local JSON if unavailable
         let json: any;
         try {
@@ -424,7 +426,8 @@ const VehicleDashboard: React.FC = () => {
         if (combinedMin !== null && combinedMax !== null) {
           const start = new Date(combinedMin);
           const end = new Date(combinedMax);
-          setSelectedTime(start);
+          const center = new Date(Math.floor((start.getTime() + end.getTime()) / 2));
+          setSelectedTime(center);
           setSelectionStart(start);
           setSelectionEnd(end);
         } else {
@@ -432,11 +435,20 @@ const VehicleDashboard: React.FC = () => {
           const lastTs = times[times.length - 1];
           if (firstTs) {
             const first = new Date(firstTs);
-            setSelectedTime(first);
             setSelectionStart(first);
           }
-          if (lastTs) setSelectionEnd(new Date(lastTs));
+          if (lastTs) {
+            const last = new Date(lastTs);
+            setSelectionEnd(last);
+            if (firstTs) {
+              const center = new Date(Math.floor((firstTs + lastTs) / 2));
+              setSelectedTime(center);
+            } else {
+              setSelectedTime(new Date(lastTs));
+            }
+          }
         }
+        setLoading(false);
         return;
       } catch (e) {
         // fallback to generator
@@ -450,6 +462,7 @@ const VehicleDashboard: React.FC = () => {
           if (first) setSelectionStart(new Date(first));
           if (last) setSelectionEnd(new Date(last));
         } catch {}
+        setLoading(false);
       }
     };
     load();
@@ -584,6 +597,14 @@ const VehicleDashboard: React.FC = () => {
       </div>
 
       <div className={styles.scrollArea}>
+        {loading && (
+          <div className={styles.loaderOverlay}>
+            <div className={styles.loader}>
+              <div className={styles.loaderRing} />
+              <div className={styles.loaderDot} />
+            </div>
+          </div>
+        )}
         {/* Digital Signal Timeline Chart */}
         {digitalStatusChart && digitalStatusChart.metrics.length > 0 && (
           <DigitalSignalTimeline
