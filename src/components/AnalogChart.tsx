@@ -230,7 +230,7 @@ const AnalogChart: React.FC<AnalogChartProps> = ({
         </div>
       </div>
       <div className={styles.chartWrapper}>
-        <ResponsiveContainer width="100%" height={220}>
+        <ResponsiveContainer width="100%" height={160}>
           <ComposedChart
             data={chartData}
             margin={{ top: 10, right: 30, left: 20, bottom: 40 }}
@@ -267,20 +267,7 @@ const AnalogChart: React.FC<AnalogChartProps> = ({
           </ComposedChart>
         </ResponsiveContainer>
       </div>
-      {selectedPoint && (
-        <div className={styles.currentStatus}>
-          <span className={styles.summaryLabel} style={{ marginRight: 6 }}>At {format(new Date(selectedPoint.time), 'HH:mm:ss')}</span>
-          <span className={styles.statusValue} style={{ color, marginRight: 10 }}>
-            Avg: {selectedPoint.avg.toFixed(1)} {unit}
-          </span>
-          <span className={styles.statusValue} style={{ color: '#ef4444', marginRight: 10 }}>
-            Max: {selectedPoint.max.toFixed(1)} {unit}
-          </span>
-          <span className={styles.statusValue} style={{ color: '#10b981' }}>
-            Min: {selectedPoint.min.toFixed(1)} {unit}
-          </span>
-        </div>
-      )}
+      {/* Per-time stats footer removed */}
     </div>
   );
 };

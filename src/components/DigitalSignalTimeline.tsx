@@ -37,6 +37,14 @@ const DigitalSignalTimeline: React.FC<DigitalSignalTimelineProps> = ({
   crosshairActive,
   timeDomain
 }) => {
+  // Dynamically size chart height based on number of signals to avoid overlap
+  const chartHeight = useMemo(() => {
+    const perRow = 30; // px per signal row for clearer spacing
+    const minH = 260;  // minimum height when few signals
+    const maxH = 1200; // safety cap
+    const desired = Math.max(minH, signals.length * perRow);
+    return Math.min(maxH, desired);
+  }, [signals.length]);
   const chartData = useMemo(() => {
     if (!signals.length || !signals[0].data.length) return [];
 
@@ -131,13 +139,10 @@ const DigitalSignalTimeline: React.FC<DigitalSignalTimelineProps> = ({
 
   return (
     <div className={styles.container}>
-      <div className={styles.chartHeader}>
-        <div className={styles.chartTitle}>Digital Signal Timeline</div>
-      </div>
       <div className={styles.chartRow}>
         <div className={styles.chartArea}>
-          <div className={styles.chartWrapper} ref={containerRef}>
-            <ResponsiveContainer width="100%" height={220}>
+          <div className={styles.chartWrapper} ref={containerRef} style={{ height: chartHeight }}>
+            <ResponsiveContainer width="100%" height={chartHeight}>
               <LineChart
                 data={chartData}
                 margin={{ top: 10, right: 30, left: 20, bottom: 40 }}
@@ -161,7 +166,7 @@ const DigitalSignalTimeline: React.FC<DigitalSignalTimelineProps> = ({
                   tickFormatter={formatYAxisLabel}
                   stroke="#6b7280"
                   tick={{ fill: '#6b7280', fontSize: 9 }}
-                  width={115}
+                  width={140}
                 />
                 {/* Tooltip removed */}
                 {crosshairActive && selectedTime && (
@@ -192,7 +197,7 @@ const DigitalSignalTimeline: React.FC<DigitalSignalTimelineProps> = ({
                 const status = getSignalStatus(signal);
                 const top = 20; // chart margin top
                 const bottom = 40; // chart margin bottom
-                const h = size.h > 0 ? size.h : 220; // fallback height
+                const h = size.h > 0 ? size.h : chartHeight; // fallback height matches dynamic height
                 const innerH = Math.max(1, h - top - bottom);
                 const y = top + ((idx + 0.25) / Math.max(1, signals.length)) * innerH;
                 return (

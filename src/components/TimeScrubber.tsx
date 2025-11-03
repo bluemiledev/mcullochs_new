@@ -295,7 +295,7 @@ const TimeScrubber: React.FC<TimeScrubberProps> = ({
         </div>
       </div>
       <div className={styles.chartWrapper}>
-        <ResponsiveContainer width="100%" height={80}>
+        <ResponsiveContainer width="100%" height={56}>
           <AreaChart
             data={scrubberData}
             margin={{ top: 4, right: RIGHT_MARGIN, left: CHART_LEFT_OFFSET, bottom: 0 }}
@@ -317,13 +317,7 @@ const TimeScrubber: React.FC<TimeScrubberProps> = ({
               style={{ fontSize: '9px' }}
             />
             {/* Tooltip removed */}
-            {/* background fill removed; keep axis only */}
-            {selectionStart !== null && (
-              <ReferenceLine x={selectionStart} stroke="#f59e0b" strokeWidth={2} />
-            )}
-            {selectionEnd !== null && (
-              <ReferenceLine x={selectionEnd} stroke="#f59e0b" strokeWidth={2} />
-            )}
+            {/* Keep vehicle pointer line (selected time) */}
             {selectedTime !== null && (
               <ReferenceLine
                 x={selectedTime}

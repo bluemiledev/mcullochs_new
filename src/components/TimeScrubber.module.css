@@ -55,7 +55,7 @@
   position: absolute;
   bottom: 0;
   width: 10px;
-  height: 20px;
+  height: 16px;
   transform: translateX(-50%);
   display: flex;
   align-items: flex-end;
@@ -67,15 +67,15 @@
   content: '';
   display: block;
   width: 2px;
-  height: 18px;
+  height: 14px;
   background: #f59e0b; /* orange */
 }
 
 .vehiclePointer {
   position: absolute;
-  bottom: 2px;
-  width: 14px;
-  height: 14px;
+  bottom: 1px;
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
   background: #ff6b35;
   border: 2px solid #ffffff;
@@ -89,8 +89,8 @@
 }
 
 .vehiclePointerIcon {
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
   background: #ffffff;
   -webkit-mask: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="black" d="M18.92 6.01C18.72 5.42 18.16 5 17.53 5H6.47C5.84 5 5.28 5.42 5.08 6.01L3 12v8c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1h12v1c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-8l-2.08-5.99zM6.5 16c-.83 0-1.5-.67-1.5-1.5S5.67 13 6.5 13 8 13.67 8 14.5 7.33 16 6.5 16zm11 0c-.83 0-1.5-.67-1.5-1.5S16.67 13 17.5 13 19 13.67 19 14.5 18.33 16 17.5 16zM5 12l1.5-4.5h11L19 12H5z"/></svg>') center / contain no-repeat;
           mask: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="black" d="M18.92 6.01C18.72 5.42 18.16 5 17.53 5H6.47C5.84 5 5.28 5.42 5.08 6.01L3 12v8c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1h12v1c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-8l-2.08-5.99zM6.5 16c-.83 0-1.5-.67-1.5-1.5S5.67 13 6.5 13 8 13.67 8 14.5 7.33 16 6.5 16zm11 0c-.83 0-1.5-.67-1.5-1.5S16.67 13 17.5 13 19 13.67 19 14.5 18.33 16 17.5 16zM5 12l1.5-4.5h11L19 12H5z"/></svg>') center / contain no-repeat;

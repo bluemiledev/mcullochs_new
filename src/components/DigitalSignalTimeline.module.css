@@ -1,14 +1,14 @@
 .container {
   width: 100%;
-  background: white;
-  border-radius: 6px;
-  padding: 8px 10px;
-  margin-bottom: 12px;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+  background: transparent;
+  border-radius: 0;
+  padding: 0;
+  margin-bottom: 0;
+  box-shadow: none;
 }
 
 .chartHeader {
-  margin-bottom: 12px;
+  margin-bottom: 2px;
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -23,9 +23,10 @@
 
 .chartWrapper {
   width: 100%;
-  height: 220px;
-  margin-top: 6px;
-  margin-bottom: 8px;
+  height: auto;
+  min-height: 220px;
+  margin-top: 0;
+  margin-bottom: 0;
   position: relative;
 }
 
