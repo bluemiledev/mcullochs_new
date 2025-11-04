@@ -245,13 +245,13 @@ const VehicleDashboard: React.FC = () => {
         // Use the selected vehicle ID and date in the API call
         let json: any;
         try {
-          // Use the get-data-by-devices-id-and-date endpoint (as specified by user)
-          const apiUrl = new URL('http://smartdatalink.com.au/get-data-by-devices-id-and-date');
+          // Use the correct API endpoint: https://www.smartdatalink.com.au/get-data-by-devices-id-and-date
+          const apiUrl = new URL('https://www.smartdatalink.com.au/get-data-by-devices-id-and-date');
           // Add id and date as query parameters
           apiUrl.searchParams.set('id', selectedVehicleId.toString());
           apiUrl.searchParams.set('date', selectedDate);
           
-          console.log('🔗 Fetching from PRIMARY endpoint:', apiUrl.toString());
+          console.log('🔗 Fetching from API endpoint:', apiUrl.toString());
           console.log('Vehicle ID:', selectedVehicleId, 'Date:', selectedDate);
           
           const apiRes = await fetch(apiUrl.toString(), {
@@ -262,45 +262,74 @@ const VehicleDashboard: React.FC = () => {
           
           if (!apiRes.ok) {
             console.error('❌ API response not OK:', apiRes.status, apiRes.statusText);
-            throw new Error(`API failed with status ${apiRes.status}`);
+            throw new Error(`API failed with status ${apiRes.status}: ${apiRes.statusText}`);
           }
           
           json = await apiRes.json();
-          console.log('✅ Primary API success, response:', json);
+          console.log('✅ API success, response:', json);
         } catch (err: any) {
-          console.error('❌ Primary API fetch error:', err);
+          console.error('❌ All API attempts failed:', err);
           console.error('Error details:', {
             message: err.message,
             stack: err.stack,
             name: err.name
           });
           
-          // Don't use fallback - show error to user
+          // Provide helpful error message
+          const errorMsg = err.message.includes('Failed to fetch') || err.message.includes('CORS')
+            ? 'CORS or network error. The API server may not allow requests from this domain, or the endpoint may be incorrect.'
+            : err.message;
+          
           setLoading(false);
-          alert(`Failed to load chart data from API.\n\nEndpoint: http://smartdatalink.com.au/get-data-by-devices-id-and-date\nVehicle ID: ${selectedVehicleId}\nDate: ${selectedDate}\n\nError: ${err.message}\n\nPlease check the console for more details.`);
+          alert(`Failed to load chart data from API.\n\nEndpoint: https://www.smartdatalink.com.au/get-data-by-devices-id-and-date\nVehicle ID: ${selectedVehicleId}\nDate: ${selectedDate}\n\nError: ${errorMsg}\n\nPossible issues:\n- CORS policy blocking the request\n- Network connectivity\n- API endpoint may require different authentication\n- Date format may need adjustment\n\nPlease check the browser console for more details.`);
           throw err;
         }
         // Unwrap common API envelope { status, message, data }
         const payload: any = (json && typeof json === 'object' && 'data' in json) ? (json as any).data : json;
         
         // Log the payload structure for debugging
-        console.log('📦 Payload structure:', {
-          isArray: Array.isArray(payload),
-          length: Array.isArray(payload) ? payload.length : 'N/A',
-          keys: typeof payload === 'object' && payload !== null && !Array.isArray(payload) ? Object.keys(payload) : 'N/A',
-          firstItem: Array.isArray(payload) && payload.length > 0 ? payload[0] : null,
-          payloadType: typeof payload
-        });
-        
-        // Check if payload is a flat array (new API format) or grouped structure (old format)
-        const isFlatArray = Array.isArray(payload) && payload.length > 0 && payload[0]?.chartName;
-        
-        // Debug: Log full API response
         console.group('📊 API Response - Full Payload');
         console.log('Raw JSON:', json);
         console.log('Payload:', payload);
-        console.log('Is Flat Array:', isFlatArray);
+        console.log('Payload keys:', typeof payload === 'object' && payload !== null ? Object.keys(payload) : 'N/A');
         console.groupEnd();
+        
+        // The API response structure is: { status, message, data: { times, digitalPerSecond, analogPerSecond, gpsPerSecond } }
+        // Handle null values from API (when no data available)
+        if (payload && payload.times === null && payload.digitalPerSecond === null && payload.analogPerSecond === null) {
+          console.warn('⚠️ API returned null data - showing empty charts');
+          console.log('API Response:', { status: json.status, message: json.message, data: payload });
+          
+          // Set empty data and return early
+          setVehicleMetrics([]);
+          setDigitalStatusChart({
+            id: 'digital-status',
+            name: 'Digital Status Indicators',
+            metrics: []
+          });
+          setSelectedTime(null);
+          setSelectionStart(null);
+          setSelectionEnd(null);
+          setLoading(false);
+          return;
+        }
+        
+        // Check if we have per-second data format
+        const hasPerSecondData = payload && (
+          (Array.isArray(payload.digitalPerSecond) && payload.digitalPerSecond.length > 0) ||
+          (Array.isArray(payload.analogPerSecond) && payload.analogPerSecond.length > 0)
+        );
+        
+        // Check if payload is a flat array (alternative format)
+        const isFlatArray = Array.isArray(payload) && payload.length > 0 && payload[0]?.chartName;
+        
+        console.log('📦 Data format detection:', {
+          hasPerSecondData,
+          isFlatArray,
+          digitalPerSecond: payload?.digitalPerSecond,
+          analogPerSecond: payload?.analogPerSecond,
+          times: payload?.times
+        });
         
         // If flat array format, transform it into grouped structure
         if (isFlatArray) {
@@ -389,8 +418,8 @@ const VehicleDashboard: React.FC = () => {
           console.groupEnd();
           
           // Replace payload with grouped structure
-          (payload as any).digitalSignals = digitalSignals;
-          (payload as any).analogSignals = analogSignals;
+          if (digitalSignals.length > 0) (payload as any).digitalSignals = digitalSignals;
+          if (analogSignals.length > 0) (payload as any).analogSignals = analogSignals;
         }
         
         // Normalize possible server payloads into common structure
