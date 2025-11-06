@@ -703,14 +703,17 @@ const VehicleDashboard: React.FC = () => {
         };
 
         const digitalSignalsRaw = pick('digitalSignals', 'digitals', 'digital') || [];
-        console.group('📡 Digital Signals - API Response');
+        console.group('📊 Digital Signals - Raw API Data');
         console.log('Number of digital signals:', digitalSignalsRaw.length);
         digitalSignalsRaw.forEach((s: any, idx: number) => {
-          console.group(`Digital Signal ${idx + 1}: ${s.id || s.name || 'Unknown'}`);
-          console.log('Raw API Data:', s);
+          console.group(`📊 Digital Signal ${idx + 1} - Raw API Data: ${s.name || s.id || 'Unknown'}`);
+          console.log('Complete API Object:', JSON.stringify(s, null, 2));
           console.log('Inverse value from API:', s.inverse, '(type:', typeof s.inverse, ')');
-          console.log('Values array:', s.values);
-          console.log('Values length:', s.values?.length || 0);
+          console.log('Inverse normalized:', String(s.inverse || '').toLowerCase().trim());
+          console.log('Will invert?', String(s.inverse || '').toLowerCase().trim() === 'yes');
+          console.log('Values array (first 20):', s.values?.slice(0, 20));
+          console.log('Values array (last 20):', s.values?.slice(-20));
+          console.log('Total values count:', s.values?.length || 0);
           console.log('Times array:', s.times || s.timeStamps || s.timestamps || 'Using global times');
           console.groupEnd();
         });
@@ -724,11 +727,14 @@ const VehicleDashboard: React.FC = () => {
             // If inverse = "no", "No", undefined, null, or anything else → show original values
             const inverseStr = String(s.inverse || '').toLowerCase().trim();
             const isInverse = inverseStr === 'yes';
-            console.log(`🔍 Digital Signal ${idx + 1} - Inverse Check:`, {
-              rawInverse: s.inverse,
-              normalized: inverseStr,
-              willInvert: isInverse
-            });
+            console.group(`🔍 Digital Signal ${idx + 1} - Inverse Processing: ${s.name || s.id || 'Unknown'}`);
+            console.log('Raw inverse from API:', s.inverse);
+            console.log('Inverse type:', typeof s.inverse);
+            console.log('Normalized inverse:', inverseStr);
+            console.log('Will invert?', isInverse);
+            console.log('Original values (first 20):', s.values?.slice(0, 20));
+            console.log('Original values (last 20):', s.values?.slice(-20));
+            console.groupEnd();
             
             // Handle both string times (from flat array) and numeric timestamps
             let signalTimes: any[] = s.times || s.timeStamps || s.timestamps || [];
@@ -747,23 +753,33 @@ const VehicleDashboard: React.FC = () => {
               : times;
             
             // Apply inverse logic to values before creating series
-            // If inverse = "yes", reverse ALL values at EVERY time point (0→1, 1→0)
-            // If inverse = "no" or not present, show values as-is
+            // If inverse = "yes" or "Yes", reverse ALL values at EVERY time point (0→1, 1→0)
+            // If inverse = "no" or "No" or anything else, show original values as-is
             let values = s.values || [];
             // ONLY invert when isInverse is explicitly true (inverse === "yes")
             // If inverse = "no", "No", undefined, null, or anything else → keep original values
             if (isInverse === true && Array.isArray(values)) {
-              values = values.map((v: any) => {
+              console.log(`🔄 Inverting values for ${s.name || s.id} (inverse = "yes")`);
+              values = values.map((v: any, vIdx: number) => {
                 const numValue = Number(v);
+                let invertedValue = numValue;
                 // Invert ALL values: 0 becomes 1, 1 becomes 0
-                // Only invert if value is exactly 0 or 1
-                if (numValue === 1) return 0;
-                if (numValue === 0) return 1;
-                return numValue; // Keep other values as-is
+                if (numValue === 1) {
+                  invertedValue = 0;
+                } else if (numValue === 0) {
+                  invertedValue = 1;
+                }
+                // Log first 10 inversions for debugging
+                if (vIdx < 10) {
+                  console.log(`  Value ${vIdx}: ${numValue} → ${invertedValue}`);
+                }
+                return invertedValue;
               });
+              console.log('Inverted values (first 20):', values.slice(0, 20));
+              console.log('Inverted values (last 20):', values.slice(-20));
             } else {
               // When inverse is "no" or not set, keep original values unchanged
-              // No inversion applied - values remain as-is from API
+              console.log(`✅ Keeping original values for ${s.name || s.id} (inverse = "${s.inverse}")`);
             }
             
             const data = toSeries(values, normalizedSignalTimes);
@@ -975,14 +991,17 @@ const VehicleDashboard: React.FC = () => {
         let perSecondDigitalMaxTs: number | null = null;
         // Digital per-second override
         if (!digitalChart.metrics.length && Array.isArray((payload as any).digitalPerSecond)) {
-          console.group('📡 Digital Per-Second Data - API Response');
+          console.group('📊 Digital Per-Second Signals - Raw API Data');
           console.log('Number of digital per-second series:', (payload.digitalPerSecond as Array<any>).length);
           (payload.digitalPerSecond as Array<any>).forEach((series: any, idx: number) => {
-            console.group(`Digital Per-Second Series ${idx + 1}: ${series.id || series.name || 'Unknown'}`);
-            console.log('Raw API Data:', series);
+            console.group(`📊 Digital Per-Second Series ${idx + 1} - Raw API Data: ${series.name || series.id || 'Unknown'}`);
+            console.log('Complete API Object:', JSON.stringify(series, null, 2));
             console.log('Inverse value from API:', series.inverse, '(type:', typeof series.inverse, ')');
-            console.log('Points count:', series.points?.length || 0);
-            console.log('First 3 points:', series.points?.slice(0, 3));
+            console.log('Inverse normalized:', String(series.inverse || '').toLowerCase().trim());
+            console.log('Will invert?', String(series.inverse || '').toLowerCase().trim() === 'yes');
+            console.log('Points array (first 20):', series.points?.slice(0, 20));
+            console.log('Points array (last 20):', series.points?.slice(-20));
+            console.log('Total points count:', series.points?.length || 0);
             console.groupEnd();
           });
           console.groupEnd();
@@ -999,11 +1018,13 @@ const VehicleDashboard: React.FC = () => {
             // If inverse = "no", "No", undefined, null, or anything else → show original values
             const inverseStr = String(series.inverse || '').toLowerCase().trim();
             const isInverse = inverseStr === 'yes';
-            console.log(`🔍 Digital Per-Second Series ${idx + 1} - Inverse Check:`, {
-              rawInverse: series.inverse,
-              normalized: inverseStr,
-              willInvert: isInverse
-            });
+            console.group(`🔍 Digital Per-Second Series ${idx + 1} - Inverse Processing: ${series.name || series.id || 'Unknown'}`);
+            console.log('Raw inverse from API:', series.inverse);
+            console.log('Inverse type:', typeof series.inverse);
+            console.log('Normalized inverse:', inverseStr);
+            console.log('Will invert?', isInverse);
+            console.log('Original points (first 20):', series.points?.slice(0, 20));
+            console.log('Original points (last 20):', series.points?.slice(-20));
             
             // Use exact API values, align timestamps to minutes, sort
             // If inverse = "yes", reverse ALL values at EVERY time point (0→1, 1→0)
@@ -1022,12 +1043,16 @@ const VehicleDashboard: React.FC = () => {
                   value = 1;
                 }
                 // Keep other values as-is
-              }
-              // When inverse is "no" or not set, value remains unchanged (originalValue)
-              
-              // Debug first few points to verify inversion logic
-              if (pointIdx < 3) {
-                console.log(`  Point ${pointIdx}: original=${originalValue}, isInverse=${isInverse}, final=${value}`);
+                
+                // Log first 10 inversions for debugging
+                if (pointIdx < 10) {
+                  console.log(`  Point ${pointIdx}: original=${originalValue} → inverted=${value}`);
+                }
+              } else {
+                // When inverse is "no" or not set, value remains unchanged
+                if (pointIdx < 10) {
+                  console.log(`  Point ${pointIdx}: original=${originalValue} → kept=${value} (no inversion)`);
+                }
               }
               
               return {
@@ -1035,6 +1060,14 @@ const VehicleDashboard: React.FC = () => {
                 value
               };
             });
+            
+            if (isInverse) {
+              console.log('Inverted points (first 20):', pts.slice(0, 20));
+              console.log('Inverted points (last 20):', pts.slice(-20));
+            } else {
+              console.log('✅ Kept original values (no inversion applied)');
+            }
+            console.groupEnd();
             // Sort by timestamp
             pts.sort((a: { time: Date; value: number }, b: { time: Date; value: number }) => a.time.getTime() - b.time.getTime());
             
@@ -1671,6 +1704,48 @@ const VehicleDashboard: React.FC = () => {
           </div>
         )}
         <div className={styles.scrollContent}>
+          {/* Digital Signal Status Panel */}
+          {digitalStatusChart && digitalStatusChart.metrics.length > 0 && (
+            <div className={styles.digitalStatusPanel}>
+              <div className={styles.statusPanelHeader}>
+                <h3 className={styles.statusPanelTitle}>Digital Signal Status</h3>
+                <span className={styles.statusPanelCount}>
+                  {digitalStatusChart.metrics.length} signals
+                </span>
+              </div>
+              <div className={styles.statusPanelGrid}>
+                {digitalStatusChart.metrics.map((signal) => {
+                  // Get value at selected time if available, otherwise use currentValue
+                  let value = signal.currentValue;
+                  if (selectedTime && signal.data.length > 0) {
+                    const point = signal.data.find(d => 
+                      Math.abs(d.time.getTime() - selectedTime.getTime()) < 900000 // 15 min tolerance
+                    );
+                    if (point) {
+                      value = point.value;
+                    }
+                  }
+                  const status = value === 1 ? 'ON' : 'OFF';
+                  const isOn = status === 'ON';
+                  return (
+                    <div key={signal.id} className={styles.statusItem}>
+                      <div 
+                        className={styles.statusColorIndicator} 
+                        style={{ backgroundColor: signal.color }}
+                      />
+                      <span className={styles.statusName}>{signal.name}</span>
+                      <span 
+                        className={`${styles.statusValue} ${isOn ? styles.statusOn : styles.statusOff}`}
+                      >
+                        {status}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {/* Digital Signal Timeline Chart */}
           {digitalStatusChart && digitalStatusChart.metrics.length > 0 && (
             <DigitalSignalTimeline
