@@ -17,7 +17,8 @@
   background-color: #ffffff;
 }
 
-@media (max-width: 768px) {
+/* Small screens (phones) */
+@media (max-width: 640px) {
   .main {
     flex-direction: column;
     height: auto;
@@ -27,6 +28,73 @@
     height: 60vh;
   }
 }
+
+/* Medium screens (tablets) */
+@media (min-width: 641px) and (max-width: 1024px) {
+  .main {
+    height: calc(100vh - 60px);
+  }
+  
+  .content {
+    overflow-y: auto;
+  }
+}
+
+/* Large screens (desktops) */
+@media (min-width: 1025px) and (max-width: 1440px) {
+  .layout {
+    max-width: 100%;
+  }
+  
+  .main {
+    height: calc(100vh - 60px);
+  }
+  
+  .content {
+    overflow-y: auto;
+  }
+}
+
+/* Extra large screens (large desktops) */
+@media (min-width: 1441px) and (max-width: 1920px) {
+  .layout {
+    max-width: 100%;
+  }
+  
+  .main {
+    height: calc(100vh - 60px);
+  }
+  
+  .content {
+    overflow-y: auto;
+  }
+}
+
+/* Ultra-wide screens (4K and larger) */
+@media (min-width: 1921px) {
+  .layout {
+    max-width: 100%;
+    margin: 0 auto;
+  }
+  
+  .main {
+    height: calc(100vh - 60px);
+    max-width: 100%;
+  }
+  
+  .content {
+    overflow-y: auto;
+    max-width: 100%;
+  }
+}
+
+
+
+
+
+
+
+
 
 
 

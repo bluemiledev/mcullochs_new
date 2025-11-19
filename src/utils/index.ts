@@ -99,6 +99,50 @@ export const deepClone = <T>(obj: T): T => {
   return obj;
 };
 
+/**
+ * Converts date from YYYY-MM-DD (API format) to DD-MM-YYYY (display format)
+ */
+export const formatDateForDisplay = (dateStr: string): string => {
+  if (!dateStr || typeof dateStr !== 'string') return dateStr;
+  // Check if already in DD-MM-YYYY format
+  if (/^\d{2}-\d{2}-\d{4}$/.test(dateStr)) return dateStr;
+  // Also check for old DD/MM/YYYY format and convert it
+  if (/^\d{2}\/\d{2}\/\d{4}$/.test(dateStr)) {
+    return dateStr.replace(/\//g, '-');
+  }
+  // Convert from YYYY-MM-DD to DD-MM-YYYY
+  const parts = dateStr.split('-');
+  if (parts.length === 3 && parts[0].length === 4) {
+    return `${parts[2]}-${parts[1]}-${parts[0]}`;
+  }
+  return dateStr;
+};
+
+/**
+ * Converts date from DD-MM-YYYY (display format) to YYYY-MM-DD (API format)
+ */
+export const formatDateForAPI = (dateStr: string): string => {
+  if (!dateStr || typeof dateStr !== 'string') return dateStr;
+  // Check if already in YYYY-MM-DD format
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return dateStr;
+  // Convert from DD-MM-YYYY to YYYY-MM-DD
+  const parts = dateStr.split('-');
+  if (parts.length === 3 && parts[2].length === 4) {
+    return `${parts[2]}-${parts[1]}-${parts[0]}`;
+  }
+  // Also handle old DD/MM/YYYY format
+  const partsSlash = dateStr.split('/');
+  if (partsSlash.length === 3 && partsSlash[2].length === 4) {
+    return `${partsSlash[2]}-${partsSlash[1]}-${partsSlash[0]}`;
+  }
+  return dateStr;
+};
+
+
+
+
+
+
 
 
 

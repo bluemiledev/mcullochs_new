@@ -1,4 +1,5 @@
 import React, { useMemo, useCallback, useRef, useState, useEffect } from 'react';
+
 import {
   AreaChart,
   XAxis,
@@ -17,6 +18,7 @@ interface TimeScrubberProps {
   onTimeChange: (time: number) => void;
   onSelectionChange: (start: number, end: number) => void;
   onHover: (time: number | null) => void;
+  isSecondViewMode?: boolean;
 }
 
 const BASE_LEFT_MARGIN = 20; // same as charts
@@ -34,6 +36,7 @@ const TimeScrubber: React.FC<TimeScrubberProps> = ({
   onTimeChange,
   onSelectionChange,
   onHover,
+  isSecondViewMode = false,
 }) => {
   const scrubberData = useMemo(() => {
     return data.map(d => ({
@@ -48,6 +51,9 @@ const TimeScrubber: React.FC<TimeScrubberProps> = ({
   }, [data]);
 
   const formatTime = (tick: number) => {
+    if (isSecondViewMode) {
+      return format(new Date(tick), 'HH:mm:ss');
+    }
     return format(new Date(tick), 'HH:mm');
   };
 
@@ -57,7 +63,9 @@ const TimeScrubber: React.FC<TimeScrubberProps> = ({
   const clampToDay = (t: number) => Math.max(timeDomain[0], Math.min(timeDomain[1], t));
 
   const enforceMaxHour = (start: number, end: number): [number, number] => {
-    const maxRangeMs = 60 * 60 * 1000;
+    // In second view mode: max range is 10 minutes
+    // In minute view mode: max range is 1 hour
+    const maxRangeMs = isSecondViewMode ? (10 * 60 * 1000) : (60 * 60 * 1000);
     if (end - start > maxRangeMs) {
       return [start, start + maxRangeMs];
     }
@@ -73,9 +81,14 @@ const TimeScrubber: React.FC<TimeScrubberProps> = ({
 
     const run = () => {
       const time = clampToDay(activeLabel);
-      if (lastEmittedRef.current !== null && Math.abs(time - lastEmittedRef.current) < 1000) return;
+      // In second view mode, allow updates every second (1000ms)
+      // In minute view mode, throttle to prevent excessive updates (but still allow minute-by-minute)
+      const throttleMs = isSecondViewMode ? 100 : 1000;
+      if (lastEmittedRef.current !== null && Math.abs(time - lastEmittedRef.current) < throttleMs) return;
       lastEmittedRef.current = time;
-
+      
+      // Only call onTimeChange when dragging, not on hover
+      // Hover should only update the visual indicator, not the actual selected time
       if (isDraggingRef.current && dragMode) {
         if (dragMode === 'left' && selectionEnd !== null) {
           const [s, e2] = enforceMaxHour(time, selectionEnd);
@@ -105,7 +118,21 @@ const TimeScrubber: React.FC<TimeScrubberProps> = ({
     };
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
     rafRef.current = requestAnimationFrame(run);
-  }, [dragMode, onSelectionChange, selectionEnd, selectionStart, timeDomain]);
+  }, [dragMode, onSelectionChange, selectionEnd, selectionStart, timeDomain, isSecondViewMode, onTimeChange]);
+  
+  // Snap time to nearest minute for minute-by-minute movement, or second for second-by-second
+  const snapToTime = useCallback((t: number) => {
+    if (isSecondViewMode) {
+      // In second view mode, snap to nearest second
+      const secondMs = 1000;
+      return Math.round(t / secondMs) * secondMs;
+    } else {
+      // In minute view mode, snap to nearest minute
+      const minuteMs = 60 * 1000;
+      return Math.round(t / minuteMs) * minuteMs;
+    }
+  }, [isSecondViewMode]);
+  
   const near = (a: number | null, b: number | null, toleranceMs: number) => {
     if (a === null || b === null) return false;
     return Math.abs(a - b) <= toleranceMs;
@@ -123,7 +150,9 @@ const TimeScrubber: React.FC<TimeScrubberProps> = ({
     } else if (selectionStart !== null && selectionEnd !== null && time >= Math.min(selectionStart, selectionEnd) && time <= Math.max(selectionStart, selectionEnd)) {
       setDragMode('range');
     } else {
-      const defaultMs = 60 * 60 * 1000;
+      // In second view mode: default range is 10 minutes
+      // In minute view mode: default range is 1 hour
+      const defaultMs = isSecondViewMode ? (10 * 60 * 1000) : (60 * 60 * 1000);
       const width = selectionStart !== null && selectionEnd !== null ? Math.max(1, Math.min(defaultMs, Math.abs(selectionEnd - selectionStart))) : defaultMs;
       let newStart = clampToDay(time - Math.floor(width / 2));
       let newEnd = newStart + width;
@@ -134,8 +163,13 @@ const TimeScrubber: React.FC<TimeScrubberProps> = ({
       onSelectionChange(newStart, newEnd);
       setDragMode('range');
     }
+    
+    // Update selected time when clicking (not just hovering)
+    const snappedTime = snapToTime(time);
+    onTimeChange(snappedTime);
+    
     isDraggingRef.current = true;
-  }, [selectionStart, selectionEnd, onSelectionChange, timeDomain]);
+  }, [selectionStart, selectionEnd, onSelectionChange, timeDomain, snapToTime, onTimeChange]);
 
   const handleMouseUp = useCallback(() => {
     isDraggingRef.current = false;
@@ -149,7 +183,9 @@ const TimeScrubber: React.FC<TimeScrubberProps> = ({
   // Hover tooltip removed per requirement
 
   const overlayRef = useRef<HTMLDivElement | null>(null);
+
   const knobDraggingRef = useRef(false);
+
   const [overlayWidth, setOverlayWidth] = useState<number>(0);
 
   useEffect(() => {
@@ -180,25 +216,35 @@ const TimeScrubber: React.FC<TimeScrubberProps> = ({
     const p = (t - timeDomain[0]) / (timeDomain[1] - timeDomain[0]);
     return CHART_LEFT_OFFSET + inner * Math.max(0, Math.min(1, p));
   }, [overlayWidth, timeDomain]);
+
   const leftHandlePx = useMemo(() => positionForTime(selectionStart), [positionForTime, selectionStart]);
   const rightHandlePx = useMemo(() => positionForTime(selectionEnd), [positionForTime, selectionEnd]);
 
-  // Uniform ticks across all charts (every 10 minutes)
+  // Dynamic ticks based on data range: 30 minutes for 12 hours, 1 hour for 24 hours
+  // In second view mode, use smaller intervals (every 5 minutes)
   const ticks = useMemo(() => {
     if (!timeDomain) return undefined;
     const [start, end] = timeDomain;
-    const step = 10 * 60 * 1000;
+    const dataRangeHours = (end - start) / (60 * 60 * 1000);
+    
+    if (isSecondViewMode) {
+      // In second view mode, show ticks every 5 minutes for better readability
+      const step = 5 * 60 * 1000; // 5 minutes
+      const alignedStart = Math.floor(start / step) * step;
+      const arr: number[] = [];
+      for (let t = alignedStart; t <= end; t += step) arr.push(t);
+      return arr;
+    }
+    
+    // Use 30-minute intervals for 12-hour data, 1-hour intervals for 24-hour data
+    const step = dataRangeHours <= 12 ? (30 * 60 * 1000) : (60 * 60 * 1000);
+    
     const alignedStart = Math.floor(start / step) * step;
     const arr: number[] = [];
     for (let t = alignedStart; t <= end; t += step) arr.push(t);
     return arr;
-  }, [timeDomain]);
+  }, [timeDomain, isSecondViewMode]);
 
-  // Snap time to nearest minute for minute-by-minute movement
-  const snapToMinute = useCallback((t: number) => {
-    const minuteMs = 60 * 1000;
-    return Math.round(t / minuteMs) * minuteMs;
-  }, []);
 
   const timeFromClientX = useCallback((clientX: number) => {
     const el = overlayRef.current;
@@ -209,8 +255,8 @@ const TimeScrubber: React.FC<TimeScrubberProps> = ({
     const p = Math.max(0, Math.min(1, raw));
     const t = timeDomain[0] + p * (timeDomain[1] - timeDomain[0]);
     const clamped = clampToDay(t);
-    return snapToMinute(clamped);
-  }, [selectedTime, timeDomain, snapToMinute]);
+    return snapToTime(clamped);
+  }, [selectedTime, timeDomain, snapToTime]);
 
   const onKnobMouseDown = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -226,7 +272,7 @@ const TimeScrubber: React.FC<TimeScrubberProps> = ({
     if (selectionStart !== null && selectionEnd !== null) {
       t = Math.max(selectionStart, Math.min(selectionEnd, t));
     }
-    t = snapToMinute(t);
+    t = snapToTime(t);
     onTimeChange(t);
     
     let rafId: number | null = null;
@@ -244,8 +290,8 @@ const TimeScrubber: React.FC<TimeScrubberProps> = ({
         if (selectionStart !== null && selectionEnd !== null) {
           t2 = Math.max(selectionStart, Math.min(selectionEnd, t2));
         }
-        t2 = snapToMinute(t2);
-        // Only update if time changed to a different minute
+        t2 = snapToTime(t2);
+        // Only update if time changed
         if (t2 !== lastTime) {
           lastTime = t2;
           onTimeChange(t2);
@@ -268,7 +314,9 @@ const TimeScrubber: React.FC<TimeScrubberProps> = ({
     window.addEventListener('mouseup', onUp);
   };
 
-  const MIN_RANGE = 60 * 60 * 1000; // 1 hour
+  // In second view mode: min range is 10 minutes
+  // In minute view mode: min range is 1 hour
+  const MIN_RANGE = isSecondViewMode ? (10 * 60 * 1000) : (60 * 60 * 1000);
 
   const onLeftHandleMouseDown = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -284,7 +332,7 @@ const TimeScrubber: React.FC<TimeScrubberProps> = ({
         rafId = null;
         let newStart = timeFromClientX(ev.clientX);
         const end = selectionEnd ?? timeDomain[1];
-        // Enforce minimum 1 hour
+        // Enforce minimum range (10 minutes in second view, 1 hour in minute view)
         if (end - newStart < MIN_RANGE) newStart = end - MIN_RANGE;
         newStart = clampToDay(newStart);
         // Only update if position changed significantly
@@ -391,7 +439,7 @@ const TimeScrubber: React.FC<TimeScrubberProps> = ({
           {selectedLeftPx !== null && (
             <div
               className={styles.vehiclePointer}
-              style={{ left: `${selectedLeftPx + POINTER_ALIGN_TWEAK_PX}px`, transform: 'translateX(-50%)' }}
+              style={{ left: `${selectedLeftPx}px`, transform: 'translateX(-50%)' }}
               onMouseDown={onKnobMouseDown}
               title="Drag to set time"
             >

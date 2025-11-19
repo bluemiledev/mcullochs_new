@@ -1,0 +1,238 @@
+.container {
+  width: 100%;
+  min-height: 100vh;
+  background: #f5f5f5;
+  padding: 20px;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  background: white;
+  padding: 20px;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.title {
+  font-size: 24px;
+  font-weight: 600;
+  color: #1f2937;
+  margin: 0;
+}
+
+.headerActions {
+  display: flex;
+  gap: 12px;
+}
+
+.chartButton,
+.exportButton {
+  padding: 10px 20px;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.chartButton {
+  background: #3b82f6;
+  color: white;
+}
+
+.chartButton:hover {
+  background: #2563eb;
+}
+
+.exportButton {
+  background: #10b981;
+  color: white;
+}
+
+.exportButton:hover {
+  background: #059669;
+}
+
+.tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 20px;
+  background: white;
+  padding: 8px;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.tab {
+  padding: 10px 20px;
+  border: none;
+  background: transparent;
+  color: #6b7280;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  border-radius: 6px;
+  transition: all 0.2s;
+}
+
+.tab:hover {
+  background: #f3f4f6;
+  color: #1f2937;
+}
+
+.tab.active {
+  background: #3b82f6;
+  color: white;
+}
+
+.tab.active:hover {
+  background: #2563eb;
+}
+
+.loading,
+.noData {
+  text-align: center;
+  padding: 40px;
+  background: white;
+  border-radius: 8px;
+  color: #6b7280;
+  font-size: 16px;
+}
+
+.tableWrapper {
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  overflow: hidden;
+}
+
+.tableContainer {
+  overflow-x: auto;
+  overflow-y: auto;
+  max-height: calc(100vh - 300px);
+  position: relative;
+  width: 100%;
+}
+
+.table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 13px;
+  table-layout: fixed;
+}
+
+.table thead {
+  position: sticky;
+  top: 0;
+  background: #f9fafb;
+  z-index: 20;
+}
+
+.table th {
+  padding: 12px 16px;
+  text-align: left;
+  font-weight: 600;
+  color: #1f2937;
+  border-bottom: 2px solid #e5e7eb;
+  white-space: nowrap;
+  background: #f9fafb;
+  position: sticky;
+  top: 0;
+}
+
+/* Make first column (Device) sticky */
+.table th:first-child,
+.table td:first-child {
+  position: sticky;
+  left: 0;
+  background: white;
+  z-index: 15;
+  box-shadow: 2px 0 4px rgba(0, 0, 0, 0.1);
+}
+
+.table thead th:first-child {
+  background: #f9fafb;
+  z-index: 25;
+}
+
+.table tbody tr:hover td:first-child {
+  background: #f9fafb;
+}
+
+.table td {
+  padding: 10px 16px;
+  border-bottom: 1px solid #e5e7eb;
+  color: #374151;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.table tbody tr:hover {
+  background: #f9fafb;
+}
+
+.table tbody tr:hover td:first-child {
+  background: #f9fafb;
+}
+
+.table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+/* Set column widths */
+.table th:nth-child(1),
+.table td:nth-child(1) {
+  width: 120px;
+  min-width: 120px;
+}
+
+.table th:nth-child(2),
+.table td:nth-child(2) {
+  width: 100px;
+  min-width: 100px;
+}
+
+.table th:nth-child(3),
+.table td:nth-child(3) {
+  width: 200px;
+  min-width: 200px;
+}
+
+.table th:nth-child(n+4),
+.table td:nth-child(n+4) {
+  width: 100px;
+  min-width: 100px;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .header {
+    flex-direction: column;
+    gap: 16px;
+    align-items: flex-start;
+  }
+
+  .headerActions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+
+  .tableContainer {
+    font-size: 12px;
+    max-height: calc(100vh - 250px);
+  }
+
+  .table th,
+  .table td {
+    padding: 8px 12px;
+  }
+}
+
+
+

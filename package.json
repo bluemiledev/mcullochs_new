@@ -2,11 +2,14 @@
   "name": "react-chart-app",
   "version": "1.0.0",
   "description": "A professional React application with chart functionality",
-  "homepage": ".",
+  "homepage": "/charts",
   "main": "index.js",
   "scripts": {
     "start": "react-scripts start",
     "build": "react-scripts build",
+    "build:deploy": "npm run build && node create-deployment.js",
+    "deploy:zip": "node create-deployment.js",
+    "zip": "node create-zip-only.js",
     "test": "react-scripts test",
     "eject": "react-scripts eject",
     "lint": "eslint src --ext .js,.jsx,.ts,.tsx",
@@ -24,6 +27,7 @@
     "leaflet": "^1.9.4",
     "react": "^18.2.0",
     "react-chartjs-2": "^5.2.0",
+    "react-day-picker": "^8.10.1",
     "react-dom": "^18.2.0",
     "react-hook-form": "^7.43.5",
     "react-leaflet": "^4.2.1",
@@ -38,6 +42,7 @@
     "@types/react-dom": "^18.0.11",
     "@typescript-eslint/eslint-plugin": "^5.54.0",
     "@typescript-eslint/parser": "^5.54.0",
+    "archiver": "^6.0.2",
     "eslint": "^8.35.0",
     "eslint-config-react-app": "^7.0.1",
     "http-proxy-middleware": "^2.0.6",
@@ -73,7 +78,3 @@
     }
   }
 }
-
-
-
-

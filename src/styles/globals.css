@@ -121,6 +121,57 @@ input, button, select, textarea {
   }
 }
 
+/* Print styles - ensure all chart elements are visible */
+@media print {
+  /* Ensure SVG elements are visible and properly rendered */
+  svg {
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Ensure all text elements in SVG are visible */
+  svg text,
+  svg .recharts-text {
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    fill: #1f2937 !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Ensure Recharts components are visible */
+  .recharts-wrapper,
+  .recharts-surface,
+  .recharts-cartesian-axis,
+  .recharts-cartesian-axis-tick {
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Ensure axis labels are visible */
+  .recharts-cartesian-axis-tick-value {
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    fill: #1f2937 !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Prevent page breaks inside charts */
+  .recharts-wrapper {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+}
+
 
 
 

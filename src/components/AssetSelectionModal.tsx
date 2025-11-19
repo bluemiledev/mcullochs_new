@@ -1,5 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { DayPicker } from 'react-day-picker';
+import 'react-day-picker/dist/style.css';
 import styles from './AssetSelectionModal.module.css';
+import { formatDateForDisplay, formatDateForAPI } from '../utils';
 
 interface Vehicle {
   id: number;
@@ -19,6 +22,8 @@ const AssetSelectionModal: React.FC<AssetSelectionModalProps> = ({ onShowGraph }
   const [loadingVehicles, setLoadingVehicles] = useState<boolean>(true);
   const [loadingDates, setLoadingDates] = useState<boolean>(false);
   const [error, setError] = useState<string>('');
+  const [showCalendar, setShowCalendar] = useState<boolean>(false);
+  const calendarRef = useRef<HTMLDivElement>(null);
 
   // Fetch vehicles on mount
   useEffect(() => {
@@ -78,11 +83,14 @@ const AssetSelectionModal: React.FC<AssetSelectionModalProps> = ({ onShowGraph }
         }
         console.log('✅ Vehicles API response:', json);
         
-        // Map reet_python response: [{ devices_serial_no: "6363299" }, ...]
+        // Map reet_python response: [{ devices_serial_no: "6363299", name: "Vehicle Name" }, ...]
         const vehiclesData: Vehicle[] = (Array.isArray(json) ? json : [])
-          .map((v: any) => String(v?.devices_serial_no || ''))
-          .filter((s: string) => s.length > 0)
-          .map((serial: string) => ({ id: Number(serial), name: serial, rego: serial }));
+          .map((v: any) => {
+            const serial = String(v?.devices_serial_no || '');
+            const name = String(v?.name || serial); // Use name field from API, fallback to serial
+            return { id: Number(serial), name, rego: serial };
+          })
+          .filter((v: Vehicle) => v.id > 0);
         
         console.log('📋 Processed vehicles:', vehiclesData);
         
@@ -91,9 +99,7 @@ const AssetSelectionModal: React.FC<AssetSelectionModalProps> = ({ onShowGraph }
         }
         
         setVehicles(vehiclesData);
-        if (vehiclesData.length > 0) {
-          setSelectedVehicleId(vehiclesData[0].id);
-        }
+        // Don't auto-select vehicle - user must select manually
       } catch (err: any) {
         const errorMsg = err.message || 'Failed to load vehicles. Please check the API endpoint.';
         setError(errorMsg);
@@ -166,6 +172,7 @@ const AssetSelectionModal: React.FC<AssetSelectionModalProps> = ({ onShowGraph }
             .filter((d: string) => d.length > 0);
           
           // Ensure dates are strings and sort them (newest first)
+          // Keep dates in YYYY-MM-DD format for internal use, but display in DD-MM-YYYY
           datesData = datesData
             .map((d: any) => String(d))
             .filter((d: string) => d.length > 0)
@@ -205,11 +212,69 @@ const AssetSelectionModal: React.FC<AssetSelectionModalProps> = ({ onShowGraph }
 
   const handleShowGraph = () => {
     if (selectedVehicleId && selectedDate) {
-      onShowGraph(selectedVehicleId, selectedDate);
+      // Convert display format (DD-MM-YYYY) back to API format (YYYY-MM-DD) if needed
+      const apiDate = formatDateForAPI(selectedDate);
+      // Dispatch event so FilterControls can initialize with selected values
+      window.dispatchEvent(new CustomEvent('asset:selected', {
+        detail: {
+          device_id: selectedVehicleId,
+          date: apiDate
+        }
+      }));
+      onShowGraph(selectedVehicleId, apiDate);
     }
   };
 
   const isFormValid = selectedVehicleId !== null && selectedDate !== '';
+
+  // Close calendar when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (calendarRef.current && !calendarRef.current.contains(event.target as Node)) {
+        setShowCalendar(false);
+      }
+    };
+
+    if (showCalendar) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showCalendar]);
+
+  // Convert dates array to Date objects for DayPicker
+  const availableDates = useMemo(() => {
+    return dates.map(dateStr => {
+      const [year, month, day] = dateStr.split('-').map(Number);
+      return new Date(year, month - 1, day);
+    });
+  }, [dates]);
+
+  // Check if a date is available (not disabled)
+  const isDateDisabled = (date: Date) => {
+    const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+    return !dates.includes(dateStr);
+  };
+
+  // Handle date selection from calendar
+  const handleDateSelect = (date: Date | undefined) => {
+    if (date) {
+      const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+      if (dates.includes(dateStr)) {
+        setSelectedDate(dateStr);
+        setShowCalendar(false);
+      }
+    }
+  };
+
+  // Get selected date as Date object for DayPicker
+  const selectedDateObj = useMemo(() => {
+    if (!selectedDate) return undefined;
+    const [year, month, day] = selectedDate.split('-').map(Number);
+    return new Date(year, month - 1, day);
+  }, [selectedDate]);
 
   return (
     <div className={styles.modalOverlay}>
@@ -237,7 +302,7 @@ const AssetSelectionModal: React.FC<AssetSelectionModalProps> = ({ onShowGraph }
             <option value="">Select Asset</option>
             {vehicles.map((vehicle) => (
               <option key={vehicle.id} value={vehicle.id}>
-                {vehicle.rego || vehicle.name}
+                {vehicle.name}
               </option>
             ))}
           </select>
@@ -245,19 +310,33 @@ const AssetSelectionModal: React.FC<AssetSelectionModalProps> = ({ onShowGraph }
 
         <div className={styles.formGroup}>
           <label className={styles.label}>Select Date</label>
-          <select
-            className={styles.select}
-            value={selectedDate}
-            onChange={(e) => setSelectedDate(e.target.value)}
-            disabled={loadingDates || !selectedVehicleId}
-          >
-            <option value="">Select Date</option>
-            {dates.map((date) => (
-              <option key={date} value={date}>
-                {date}
-              </option>
-            ))}
-          </select>
+          <div className={styles.datePickerWrapper} ref={calendarRef}>
+            <button
+              type="button"
+              className={styles.datePickerButton}
+              onClick={() => setShowCalendar(!showCalendar)}
+              disabled={loadingDates || !selectedVehicleId || dates.length === 0}
+            >
+              {selectedDate ? formatDateForDisplay(selectedDate) : 'Select Date'}
+            </button>
+            {showCalendar && selectedVehicleId && dates.length > 0 && !loadingDates && (
+              <div className={styles.calendarDropdown}>
+                <DayPicker
+                  mode="single"
+                  selected={selectedDateObj}
+                  onSelect={handleDateSelect}
+                  disabled={isDateDisabled}
+                  modifiers={{
+                    available: availableDates
+                  }}
+                  modifiersClassNames={{
+                    available: styles.availableDate
+                  }}
+                  className={styles.calendar}
+                />
+              </div>
+            )}
+          </div>
           {loadingDates && selectedVehicleId && (
             <div className={styles.loadingText}>Loading dates...</div>
           )}

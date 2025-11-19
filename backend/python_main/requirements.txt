@@ -1,7 +1,0 @@
-mysql-connector-python
-numpy
-pandas
-polars
-schedule
-redis
-python-dotenv

@@ -49,6 +49,7 @@
   top: 0;
   bottom: 0;
   pointer-events: none;
+  z-index: 10;
 }
 
 .rangeHandle {
@@ -73,7 +74,9 @@
 
 .vehiclePointer {
   position: absolute;
-  bottom: 1px;
+  top: 2px;
+  /* previously bottom: 1px; */
+  bottom: auto;
   width: 16px;
   height: 16px;
   border-radius: 50%;
@@ -86,6 +89,7 @@
   justify-content: center;
   pointer-events: auto;
   cursor: ew-resize;
+  z-index: 20;
 }
 
 .vehiclePointerIcon {
@@ -94,4 +98,114 @@
   background: #ffffff;
   -webkit-mask: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="black" d="M18.92 6.01C18.72 5.42 18.16 5 17.53 5H6.47C5.84 5 5.28 5.42 5.08 6.01L3 12v8c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1h12v1c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-8l-2.08-5.99zM6.5 16c-.83 0-1.5-.67-1.5-1.5S5.67 13 6.5 13 8 13.67 8 14.5 7.33 16 6.5 16zm11 0c-.83 0-1.5-.67-1.5-1.5S16.67 13 17.5 13 19 13.67 19 14.5 18.33 16 17.5 16zM5 12l1.5-4.5h11L19 12H5z"/></svg>') center / contain no-repeat;
           mask: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="black" d="M18.92 6.01C18.72 5.42 18.16 5 17.53 5H6.47C5.84 5 5.28 5.42 5.08 6.01L3 12v8c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1h12v1c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-8l-2.08-5.99zM6.5 16c-.83 0-1.5-.67-1.5-1.5S5.67 13 6.5 13 8 13.67 8 14.5 7.33 16 6.5 16zm11 0c-.83 0-1.5-.67-1.5-1.5S16.67 13 17.5 13 19 13.67 19 14.5 18.33 16 17.5 16zM5 12l1.5-4.5h11L19 12H5z"/></svg>') center / contain no-repeat;
+}
+
+.timeLabel {
+  position: absolute;
+  top: -20px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #1f2937;
+  background: rgba(255, 255, 255, 0.95);
+  padding: 2px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+  border: 1px solid #e5e7eb;
+  z-index: 20;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+/* Responsive Styles */
+/* Small screens (phones) */
+@media (max-width: 640px) {
+  .scrubberTitle {
+    font-size: 11px;
+  }
+
+  .scrubberInfo {
+    font-size: 9px;
+  }
+
+  .tooltip {
+    font-size: 10px;
+    padding: 5px 8px;
+  }
+
+  .rangeHandle {
+    width: 8px;
+    height: 14px;
+  }
+
+  .vehiclePointer {
+    width: 14px;
+    height: 14px;
+  }
+
+  .vehiclePointerIcon {
+    width: 8px;
+    height: 8px;
+  }
+}
+
+/* Medium screens (tablets) */
+@media (min-width: 641px) and (max-width: 1024px) {
+  .scrubberTitle {
+    font-size: 11.5px;
+  }
+}
+
+/* Large screens (desktops) */
+@media (min-width: 1025px) and (max-width: 1440px) {
+  .scrubberTitle {
+    font-size: 12px;
+  }
+}
+
+/* Extra large screens (large desktops) */
+@media (min-width: 1441px) and (max-width: 1920px) {
+  .scrubberTitle {
+    font-size: 13px;
+  }
+
+  .scrubberInfo {
+    font-size: 11px;
+  }
+
+  .tooltip {
+    font-size: 12px;
+    padding: 7px 11px;
+  }
+}
+
+/* Ultra-wide screens (4K and larger) */
+@media (min-width: 1921px) {
+  .scrubberTitle {
+    font-size: 14px;
+  }
+
+  .scrubberInfo {
+    font-size: 12px;
+  }
+
+  .tooltip {
+    font-size: 13px;
+    padding: 8px 12px;
+  }
+
+  .rangeHandle {
+    width: 12px;
+    height: 18px;
+  }
+
+  .vehiclePointer {
+    width: 18px;
+    height: 18px;
+  }
+
+  .vehiclePointerIcon {
+    width: 12px;
+    height: 12px;
+  }
 }

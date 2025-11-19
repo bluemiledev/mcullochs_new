@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { flushSync } from 'react-dom';
 import { format, parseISO } from 'date-fns';
 import TimeScrubber from '../components/TimeScrubber';
 import DigitalSignalTimeline from '../components/DigitalSignalTimeline';
 import AnalogChart from '../components/AnalogChart';
 import AssetSelectionModal from '../components/AssetSelectionModal';
 import FilterOptionsModal from '../components/FilterOptionsModal';
+import ErrorModal from '../components/ErrorModal';
 import styles from './VehicleDashboard.module.css';
 import { useTimeContext } from '../context/TimeContext';
 
@@ -13,7 +15,9 @@ interface VehicleMetric {
   name: string;
   unit: string;
   color: string;
-  data: Array<{ time: Date; value: number }>;
+  min_color?: string;
+  max_color?: string;
+  data: Array<{ time: Date; value?: number; avg?: number | null; min?: number | null; max?: number | null }>;
   currentValue: number;
   avg: number;
   min: number;
@@ -41,18 +45,47 @@ const VehicleDashboard: React.FC = () => {
   const [selectionEnd, setSelectionEnd] = useState<Date | null>(null);
   const [crosshairActive, setCrosshairActive] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(false);
-  const [showAssetModal, setShowAssetModal] = useState<boolean>(true);
-  const [selectedVehicleId, setSelectedVehicleId] = useState<number | null>(null);
-  const [selectedDate, setSelectedDate] = useState<string>('');
+  // Commented out asset modal - using dummy data
+  // const [showAssetModal, setShowAssetModal] = useState<boolean>(true);
+  const [showAssetModal, setShowAssetModal] = useState<boolean>(false);
+  const [selectedVehicleId, setSelectedVehicleId] = useState<number | null>(6363298);
+  const [selectedDate, setSelectedDate] = useState<string>('2025-01-15');
   const [visibleChartsCount, setVisibleChartsCount] = useState<number>(5); // Start with 5 charts, progressively render more
   const [processingProgress, setProcessingProgress] = useState<number>(0);
-  const [vehicles, setVehicles] = useState<Array<{ id: number; rego: string }>>([]);
+  const [vehicles, setVehicles] = useState<Array<{ id: number; name: string; rego: string }>>([]);
   const [dates, setDates] = useState<string[]>([]);
   const [loadingVehicles, setLoadingVehicles] = useState<boolean>(false);
   const [loadingDates, setLoadingDates] = useState<boolean>(false);
   const [visibleDigital, setVisibleDigital] = useState<Record<string, boolean>>({});
   const [visibleAnalog, setVisibleAnalog] = useState<Record<string, boolean>>({});
   const [showFilters, setShowFilters] = useState<boolean>(false);
+  const [forceAllChartsVisible, setForceAllChartsVisible] = useState<boolean>(false);
+  const [selectedHourRange, setSelectedHourRange] = useState<{ start: string; end: string; label: string } | null>(null);
+  const [isSecondViewMode, setIsSecondViewMode] = useState<boolean>(false);
+  const [perSecondData, setPerSecondData] = useState<any>(null);
+  const [errorModal, setErrorModal] = useState<{
+    isOpen: boolean;
+    message: string;
+    details?: string;
+    endpoint?: string;
+    showRefresh?: boolean;
+  }>({
+    isOpen: false,
+    message: ''
+  });
+  
+  // Use refs to access latest values in event listeners
+  const vehicleMetricsRef = useRef<VehicleMetric[]>([]);
+  const digitalStatusChartRef = useRef<DigitalStatusChart | null>(null);
+  
+  // Keep refs in sync with state
+  useEffect(() => {
+    vehicleMetricsRef.current = vehicleMetrics;
+  }, [vehicleMetrics]);
+  
+  useEffect(() => {
+    digitalStatusChartRef.current = digitalStatusChart;
+  }, [digitalStatusChart]);
 
   // Generate realistic vehicle data patterns
   const generateVehicleData = useCallback((): { analogMetrics: VehicleMetric[]; digitalChart: DigitalStatusChart } => {
@@ -226,6 +259,25 @@ const VehicleDashboard: React.FC = () => {
     };
   }, []);
 
+  // ✅ Place this useEffect directly inside the component,
+// at the same indentation level as your other useEffects.
+useEffect(() => {
+  const beforePrint = () => {
+    document.body.classList.add('print-mode');
+    window.scrollTo(0, 0);
+  };
+  const afterPrint = () => {
+    document.body.classList.remove('print-mode');
+  };
+  window.addEventListener('beforeprint', beforePrint);
+  window.addEventListener('afterprint', afterPrint);
+  return () => {
+    window.removeEventListener('beforeprint', beforePrint);
+    window.removeEventListener('afterprint', afterPrint);
+  };
+}, []);
+
+
   const handleShowGraph = useCallback((vehicleId: number, date: string) => {
     // Clear previous data before loading new data
     setVehicleMetrics([]);
@@ -242,11 +294,21 @@ const VehicleDashboard: React.FC = () => {
     setSelectedDate(date);
     setShowAssetModal(false);
     
+    // Dispatch event so FilterControls can initialize with selected values
+    window.dispatchEvent(new CustomEvent('asset:selected', {
+      detail: {
+        vehicleId,
+        date
+      }
+    }));
+    
     // Dispatch event so MapComponent can load GPS data
     window.dispatchEvent(new CustomEvent('filters:apply', { 
       detail: { device_id: vehicleId, date } 
     }));
   }, []);
+
+  
 
   // Fetch vehicles (for header controls)
   useEffect(() => {
@@ -288,11 +350,14 @@ const VehicleDashboard: React.FC = () => {
             throw new Error(`API returned invalid JSON. Content-Type: ${contentType}`);
           }
         }
-        // Map: [{ devices_serial_no: "6363299" }, ...]
+        // Map: [{ devices_serial_no: "6363299", name: "Vehicle Name" }, ...]
         const arr = (Array.isArray(json) ? json : [])
-          .map((v: any) => String(v?.devices_serial_no || ''))
-          .filter((s: string) => s.length > 0)
-          .map((serial: string) => ({ id: Number(serial), rego: serial }));
+          .map((v: any) => {
+            const serial = String(v?.devices_serial_no || '');
+            const name = String(v?.name || serial); // Use name field from API, fallback to serial
+            return { id: Number(serial), name, rego: serial };
+          })
+          .filter((v: { id: number; name: string; rego: string }) => v.id > 0);
         setVehicles(arr);
         // Don't auto-select vehicle - user must select from AssetSelectionModal
       } catch (e) {
@@ -366,19 +431,294 @@ const VehicleDashboard: React.FC = () => {
     };
     const onOpen = () => setShowFilters(true);
     const onClear = () => { setVisibleAnalog({}); setVisibleDigital({}); };
+    
+    // Handle print full page - show all charts
+    const onPrintFullPage = () => {
+      console.log('🖨️ Print Full Page: Forcing all charts visible');
+      console.log('🖨️ Current vehicleMetrics count:', vehicleMetricsRef.current.length);
+      console.log('🖨️ Current digitalStatusChart:', digitalStatusChartRef.current ? 'exists' : 'null');
+      
+      // Use flushSync to force immediate synchronous state updates
+      flushSync(() => {
+        // Force all charts to be visible
+        setForceAllChartsVisible(true);
+        
+        // Also update the visibility records to ensure everything is marked as visible
+        // Use refs to get latest values
+        const allAnalogVisible: Record<string, boolean> = {};
+        vehicleMetricsRef.current.forEach(metric => {
+          allAnalogVisible[metric.id] = true;
+        });
+        setVisibleAnalog(allAnalogVisible);
+        
+        const allDigitalVisible: Record<string, boolean> = {};
+        if (digitalStatusChartRef.current) {
+          digitalStatusChartRef.current.metrics.forEach(metric => {
+            allDigitalVisible[metric.id] = true;
+          });
+        }
+        setVisibleDigital(allDigitalVisible);
+        
+        console.log('🖨️ Set visibility for', Object.keys(allAnalogVisible).length, 'analog charts');
+        console.log('🖨️ Set visibility for', Object.keys(allDigitalVisible).length, 'digital charts');
+      });
+      
+      // Dispatch a custom event after state is flushed to notify that DOM should be ready
+      setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('print:fullpage:ready'));
+      }, 0);
+    };
+    
+    // Restore visibility after print
+    const onPrintFullPageDone = () => {
+      console.log('🖨️ Print Full Page: Done, restoring normal state');
+      // Restore normal visibility behavior
+      setForceAllChartsVisible(false);
+    };
+    
     window.addEventListener('filters:apply', onApply as any);
     window.addEventListener('filters:open', onOpen as any);
     window.addEventListener('filters:clear', onClear as any);
+    window.addEventListener('print:fullpage', onPrintFullPage as any);
+    window.addEventListener('print:fullpage:done', onPrintFullPageDone as any);
     return () => {
       window.removeEventListener('filters:apply', onApply as any);
       window.removeEventListener('filters:open', onOpen as any);
       window.removeEventListener('filters:clear', onClear as any);
+      window.removeEventListener('print:fullpage', onPrintFullPage as any);
+      window.removeEventListener('print:fullpage:done', onPrintFullPageDone as any);
     };
   }, [handleShowGraph]);
 
+  // Listen to hour range selection events
+  useEffect(() => {
+    const handleHourRangeSelected = async (e: any) => {
+      const { start, end, label } = e.detail;
+      setSelectedHourRange({ start, end, label });
+      setIsSecondViewMode(true);
+      console.log('🕐 Hour range selected - Switching to second view:', start, 'to', end);
+      
+      // Load per-second data for the selected hour range
+      try {
+        setLoading(true);
+        const response = await fetch('/data/dummy-per-second-1hour.json', {
+          headers: { 'Accept': 'application/json' },
+          cache: 'no-store'
+        });
+        
+        if (!response.ok) {
+          throw new Error(`Failed to load dummy data: ${response.status}`);
+        }
+        
+        const json = await response.json();
+        
+        // Filter data to only the selected hour range (per-second, not per-minute)
+        const filterPerSecondData = (data: any) => {
+          return data.filter((point: any) => {
+            const pointTime = point.time;
+            return pointTime >= start && pointTime < end;
+          });
+        };
+        
+        const filteredData = {
+          timestamps: filterPerSecondData(json.timestamps || []),
+          gpsPerSecond: filterPerSecondData(json.gpsPerSecond || []),
+          digitalPerSecond: (json.digitalPerSecond || []).map((series: any) => ({
+            ...series,
+            points: filterPerSecondData(series.points || [])
+          })),
+          analogPerSecond: (json.analogPerSecond || []).map((series: any) => ({
+            ...series,
+            points: filterPerSecondData(series.points || [])
+          }))
+        };
+        
+        setPerSecondData(filteredData);
+        setLoading(false);
+        console.log('✅ Loaded per-second data for hour range');
+      } catch (error) {
+        console.error('Error loading per-second data:', error);
+        setLoading(false);
+      }
+    };
+    
+    const handleHourRangeCleared = () => {
+      setSelectedHourRange(null);
+      setIsSecondViewMode(false);
+      setPerSecondData(null);
+      console.log('🕐 Hour range cleared - Switching back to minute view');
+    };
+    
+    window.addEventListener('hour-range:selected', handleHourRangeSelected as any);
+    window.addEventListener('hour-range:cleared', handleHourRangeCleared);
+    
+    return () => {
+      window.removeEventListener('hour-range:selected', handleHourRangeSelected as any);
+      window.removeEventListener('hour-range:cleared', handleHourRangeCleared);
+    };
+  }, [selectedDate]);
+  
+  // Process per-second data when it's loaded
+  useEffect(() => {
+    if (!perSecondData || !isSecondViewMode) return;
+    
+    const baseDate = new Date(selectedDate);
+    baseDate.setHours(0, 0, 0, 0);
+    
+    const parseHMS = (hms: string): Date => {
+      const [hh, mm, ss] = hms.split(':').map(Number);
+      const date = new Date(baseDate);
+      date.setHours(hh, mm, ss, 0);
+      return date;
+    };
+    
+    // Process analog per-second data
+    const analogMetrics: VehicleMetric[] = [];
+    if (Array.isArray(perSecondData.analogPerSecond)) {
+      perSecondData.analogPerSecond.forEach((series: any) => {
+        if (series.display === false) return;
+        
+        const id = String(series.id);
+        const resolution = Number(series.resolution ?? 1);
+        const offset = Number(series.offset ?? 0);
+        
+        const applyTransformation = (value: number | null | undefined): number | null => {
+          if (value === null || value === undefined) return null;
+          const numValue = Number(value);
+          if (!Number.isFinite(numValue) || isNaN(numValue)) return null;
+          return (numValue * resolution) + offset;
+        };
+        
+        const points = (series.points || []).map((p: any) => {
+          const time = parseHMS(p.time);
+          const avg = applyTransformation(p.avg);
+          const min = applyTransformation(p.min);
+          const max = applyTransformation(p.max);
+          
+          return {
+            time,
+            avg: (avg != null && Number.isFinite(avg) && !isNaN(avg)) ? avg : null,
+            min: (min != null && Number.isFinite(min) && !isNaN(min)) ? min : null,
+            max: (max != null && Number.isFinite(max) && !isNaN(max)) ? max : null
+          };
+        }).sort((a: any, b: any) => a.time.getTime() - b.time.getTime());
+        
+        if (points.length === 0) return;
+        
+        const values = points.map((p: any) => p.avg).filter((v: any): v is number => v != null && Number.isFinite(v) && !isNaN(v));
+        const allMins = points.map((p: any) => p.min).filter((v: any): v is number => v != null && Number.isFinite(v) && !isNaN(v));
+        const allMaxs = points.map((p: any) => p.max).filter((v: any): v is number => v != null && Number.isFinite(v) && !isNaN(v));
+        
+        const minVal = allMins.length > 0 ? Math.min(...allMins) : (values.length > 0 ? Math.min(...values) : 0);
+        const maxVal = allMaxs.length > 0 ? Math.max(...allMaxs) : (values.length > 0 ? Math.max(...values) : 0);
+        const usedRange = series.yAxisRange ? { min: Number(series.yAxisRange.min), max: Number(series.yAxisRange.max) } : { min: minVal, max: maxVal };
+        
+        const safeAvg = values.length > 0 ? values.reduce((a: number, b: number) => a + b, 0) / values.length : 0;
+        const safeMin = allMins.length > 0 ? Math.min(...allMins) : (values.length > 0 ? Math.min(...values) : 0);
+        const safeMax = allMaxs.length > 0 ? Math.max(...allMaxs) : (values.length > 0 ? Math.max(...values) : 0);
+        
+        analogMetrics.push({
+          id,
+          name: String(series.name ?? id),
+          unit: String(series.unit ?? ''),
+          color: String(series.color ?? '#2563eb'),
+          min_color: series.min_color ? String(series.min_color) : undefined,
+          max_color: series.max_color ? String(series.max_color) : undefined,
+          data: points as any,
+          currentValue: values.length > 0 ? values[values.length - 1] : 0,
+          avg: safeAvg,
+          min: safeMin,
+          max: safeMax,
+          yAxisRange: usedRange
+        });
+      });
+    }
+    
+    // Process digital per-second data
+    let digitalChart: DigitalStatusChart | null = null;
+    if (Array.isArray(perSecondData.digitalPerSecond)) {
+      const metrics = perSecondData.digitalPerSecond
+        .filter((series: any) => series.display !== false)
+        .map((series: any) => {
+          const points = (series.points || []).map((p: any) => ({
+            time: parseHMS(p.time),
+            value: Number(p.value ?? 0)
+          })).sort((a: any, b: any) => a.time.getTime() - b.time.getTime());
+          
+          return {
+            id: String(series.id),
+            name: String(series.name ?? series.id),
+            color: String(series.color ?? '#999'),
+            data: points,
+            currentValue: points.length > 0 ? Number(points[points.length - 1].value) : 0
+          };
+        });
+      
+      if (metrics.length > 0) {
+        digitalChart = {
+          id: 'digital-status',
+          name: 'Digital Status Indicators',
+          metrics
+        };
+      }
+    }
+    
+    // Dispatch GPS data - convert time strings to timestamps
+    if (Array.isArray(perSecondData.gpsPerSecond) && perSecondData.gpsPerSecond.length > 0) {
+      const processedGpsData = perSecondData.gpsPerSecond.map((point: any) => {
+        // Convert time string (HH:mm:ss) to timestamp
+        const [hh, mm, ss] = (point.time || '00:00:00').split(':').map(Number);
+        const gpsTime = new Date(baseDate);
+        gpsTime.setHours(hh, mm, ss, 0);
+        
+        return {
+          ...point,
+          time: gpsTime.getTime(), // Convert to timestamp
+          lat: point.lat,
+          lng: point.lng,
+          speed: point.speed,
+          heading: point.heading
+        };
+      }).sort((a: any, b: any) => a.time - b.time);
+      
+      window.dispatchEvent(new CustomEvent('gps:data', { 
+        detail: { gpsData: processedGpsData } 
+      }));
+      console.log('📍 Dispatched processed GPS data for second view:', processedGpsData.length, 'points');
+    }
+    
+    setVehicleMetrics(analogMetrics);
+    if (digitalChart) {
+      setDigitalStatusChart(digitalChart);
+    }
+    
+    // Set initial time to start of range
+    if (selectedHourRange) {
+      const [hh, mm, ss] = selectedHourRange.start.split(':').map(Number);
+      const initialTime = new Date(baseDate);
+      initialTime.setHours(hh, mm, ss, 0);
+      setSelectedTime(initialTime);
+      
+      // Set selection range: 10 minutes in second view mode, 1 hour in minute view mode
+      const endTime = new Date(initialTime);
+      if (isSecondViewMode) {
+        endTime.setMinutes(mm + 10, 0, 0); // 10 minutes range
+        // If adding 10 minutes crosses hour boundary, cap at hour end
+        if (endTime.getHours() !== hh) {
+          endTime.setHours(hh, 59, 59, 999);
+        }
+      } else {
+        endTime.setHours(hh + 1, 0, 0, 0); // 1 hour range
+      }
+      setSelectionStart(initialTime);
+      setSelectionEnd(endTime);
+    }
+  }, [perSecondData, isSecondViewMode, selectedDate, selectedHourRange]);
+
   useEffect(() => {
     // Only load chart data when vehicle and date are selected
-    if (showAssetModal || !selectedVehicleId || !selectedDate) {
+    // Skip loading if in second view mode (per-second data is loaded separately)
+    if (showAssetModal || !selectedVehicleId || !selectedDate || isSecondViewMode) {
       return;
     }
 
@@ -386,6 +726,9 @@ const VehicleDashboard: React.FC = () => {
       try {
         setLoading(true);
         setProcessingProgress(0);
+        
+        // COMMENTED OUT API CALL - Using dummy JSON file instead
+        /*
         // Use the create_json.php API endpoint with reading_date and devices_serial_no parameters
         let json: any;
         try {
@@ -411,6 +754,7 @@ const VehicleDashboard: React.FC = () => {
             throw new Error(`API failed with status ${apiRes.status}: ${apiRes.statusText}`);
           }
           
+          
           // Get response as text first to check if it's valid JSON
           const responseText = await apiRes.text();
           const contentType = apiRes.headers.get('content-type');
@@ -429,9 +773,23 @@ const VehicleDashboard: React.FC = () => {
             // Check if it's HTML
             if (responseText.includes('<!doctype') || responseText.includes('<html')) {
               console.error('❌ API returned HTML page instead of JSON');
-              throw new Error(`API returned HTML page instead of JSON. This usually means the proxy isn't working or the endpoint doesn't exist. Check console for full response.`);
+              setErrorModal({
+                isOpen: true,
+                message: 'We could not load your data right now. Please refresh the page and try again.',
+                details: undefined,
+                endpoint: undefined,
+                showRefresh: true
+              });
+              throw new Error('API returned HTML instead of JSON');
             } else {
-              throw new Error(`Invalid JSON response from API. The server may be returning PHP serialized data or HTML. Response starts with: ${responseText.substring(0, 100)}`);
+              setErrorModal({
+                isOpen: true,
+                message: 'We could not load your data right now. Please refresh the page and try again.',
+                details: undefined,
+                endpoint: undefined,
+                showRefresh: true
+              });
+              throw new Error('Invalid JSON response from API');
             }
           }
         } catch (err: any) {
@@ -453,7 +811,15 @@ const VehicleDashboard: React.FC = () => {
           setLoading(false);
             setProcessingProgress(0);
             console.error('Full error details:', err);
-            alert(`Failed to load chart data from API.\n\nEndpoint: /reet_python/create_json.php?reading_date=${selectedDate}&devices_serial_no=${selectedVehicleId}\n\nError: ${errorMsg}\n\nTroubleshooting:\n1. Check browser console (F12) for detailed error\n2. Check Network tab to see if request was blocked\n3. Restart dev server (npm start) - proxy needs restart to take effect\n4. Verify the API endpoint is accessible\n\nNote: Make sure your dev server is running and has been restarted after proxy configuration.`);
+            
+            // Show simple refresh modal
+            setErrorModal({
+              isOpen: true,
+              message: 'We could not load your data right now. Please refresh the page and try again.',
+              details: undefined,
+              endpoint: undefined,
+              showRefresh: true
+            });
           } else {
             // Just log the error, don't show alert if no selection
             console.warn('⚠️ API error but no valid selection - ignoring');
@@ -462,9 +828,159 @@ const VehicleDashboard: React.FC = () => {
           }
           throw err;
         }
-        // The create_json.php API returns data directly (not wrapped in {status, message, data})
-        // Structure: { timestamps, gpsPerSecond, digitalPerSecond, analogPerMinute }
-        const payload: any = json;
+        */
+        
+        // LOAD FROM DUMMY JSON FILE INSTEAD
+        console.log('📂 Loading dummy data from JSON file...');
+        const response = await fetch('/data/dummy-per-second-1hour.json', {
+          headers: { 
+            'Accept': 'application/json'
+          },
+          cache: 'no-store'
+        });
+        
+        if (!response.ok) {
+          throw new Error(`Failed to load dummy data: ${response.status} ${response.statusText}`);
+        }
+        
+        const json = await response.json();
+        console.log('✅ Loaded dummy JSON data');
+        
+        // Convert analogPerSecond to analogPerMinute format (aggregate 60 seconds into 1 minute)
+        const convertPerSecondToPerMinute = (perSecondData: any[]) => {
+          return perSecondData.map((series: any) => {
+            const minuteMap = new Map<string, { avgs: number[]; mins: number[]; maxs: number[] }>();
+            
+            // Group points by minute
+            (series.points || []).forEach((point: any) => {
+              const [hh, mm, ss] = point.time.split(':').map(Number);
+              const minuteKey = `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+              
+              if (!minuteMap.has(minuteKey)) {
+                minuteMap.set(minuteKey, { avgs: [], mins: [], maxs: [] });
+              }
+              
+              const minuteData = minuteMap.get(minuteKey)!;
+              if (point.avg != null && !isNaN(point.avg)) minuteData.avgs.push(point.avg);
+              if (point.min != null && !isNaN(point.min)) minuteData.mins.push(point.min);
+              if (point.max != null && !isNaN(point.max)) minuteData.maxs.push(point.max);
+            });
+            
+            // Create per-minute points
+            const minutePoints = Array.from(minuteMap.entries())
+              .sort(([a], [b]) => a.localeCompare(b))
+              .map(([minuteKey, data]) => {
+                const avg = data.avgs.length > 0 ? data.avgs.reduce((a, b) => a + b, 0) / data.avgs.length : null;
+                const min = data.mins.length > 0 ? Math.min(...data.mins) : (avg != null ? avg : null);
+                const max = data.maxs.length > 0 ? Math.max(...data.maxs) : (avg != null ? avg : null);
+                
+                return {
+                  time: `${minuteKey}:00`,
+                  avg,
+                  min,
+                  max
+                };
+              });
+            
+            return {
+              ...series,
+              points: minutePoints
+            };
+          });
+        };
+        
+        // Convert digitalPerSecond to per-minute (take value at :00 second of each minute)
+        const convertDigitalPerSecondToPerMinute = (perSecondData: any[]) => {
+          return perSecondData.map((series: any) => {
+            const minutePoints: any[] = [];
+            const minuteMap = new Map<string, number>();
+            
+            // Group by minute, take the value at :00 second
+            (series.points || []).forEach((point: any) => {
+              const [hh, mm, ss] = point.time.split(':').map(Number);
+              if (ss === 0) {
+                const minuteKey = `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+                minuteMap.set(minuteKey, point.value);
+              }
+            });
+            
+            // Create per-minute points
+            Array.from(minuteMap.entries())
+              .sort(([a], [b]) => a.localeCompare(b))
+              .forEach(([minuteKey, value]) => {
+                minutePoints.push({
+                  time: `${minuteKey}:00`,
+                  value
+                });
+              });
+            
+            return {
+              ...series,
+              points: minutePoints
+            };
+          });
+        };
+        
+        // Convert timestamps to per-minute (take :00 second of each minute)
+        const convertTimestampsToPerMinute = (timestamps: any[]) => {
+          const minuteMap = new Map<string, any>();
+          timestamps.forEach((ts: any) => {
+            const [hh, mm, ss] = ts.time.split(':').map(Number);
+            if (ss === 0) {
+              const minuteKey = `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+              minuteMap.set(minuteKey, ts);
+            }
+          });
+          return Array.from(minuteMap.values()).sort((a, b) => a.time.localeCompare(b.time));
+        };
+        
+        // Create payload with converted per-minute data
+        let payload: any = {
+          timestamps: convertTimestampsToPerMinute(json.timestamps || []),
+          gpsPerSecond: json.gpsPerSecond || [],
+          digitalPerSecond: convertDigitalPerSecondToPerMinute(json.digitalPerSecond || []),
+          analogPerMinute: convertPerSecondToPerMinute(json.analogPerSecond || [])
+        };
+        
+        // Filter by hour range if selected
+        if (selectedHourRange) {
+          const filterByTimeRange = (items: any[], timeField: string) => {
+            return items.map((item: any) => {
+              if (Array.isArray(item.points)) {
+                // For series with points array
+                const filteredPoints = item.points.filter((point: any) => {
+                  const pointTime = point.time || point[timeField];
+                  return pointTime >= selectedHourRange.start && pointTime < selectedHourRange.end;
+                });
+                return { ...item, points: filteredPoints };
+              } else if (Array.isArray(item)) {
+                // For arrays of timestamps or GPS points
+                return item.filter((point: any) => {
+                  const pointTime = point.time || point[timeField];
+                  return pointTime >= selectedHourRange.start && pointTime < selectedHourRange.end;
+                });
+              }
+              return item;
+            });
+          };
+          
+          payload = {
+            timestamps: filterByTimeRange(payload.timestamps, 'time'),
+            gpsPerSecond: filterByTimeRange(payload.gpsPerSecond, 'time'),
+            digitalPerSecond: filterByTimeRange(payload.digitalPerSecond, 'time'),
+            analogPerMinute: filterByTimeRange(payload.analogPerMinute, 'time')
+          };
+          
+          console.log('🔍 Filtered data by hour range:', selectedHourRange.start, 'to', selectedHourRange.end);
+        }
+        
+        console.log('✅ Converted per-second data to per-minute format');
+        console.log('📊 Per-minute data:', {
+          timestamps: payload.timestamps.length,
+          analogPerMinute: payload.analogPerMinute.length,
+          digitalPerSecond: payload.digitalPerSecond.length,
+          gpsPerSecond: payload.gpsPerSecond.length
+        });
         
         // Log the payload structure for debugging
         console.group('📊 API Response - Full Payload');
@@ -475,6 +991,51 @@ const VehicleDashboard: React.FC = () => {
         console.log('Digital signals:', payload?.digitalPerSecond?.length || 0);
         console.log('Analog signals:', payload?.analogPerMinute?.length || 0);
         console.groupEnd();
+        
+        // Dispatch GPS data to MapComponent if available (only in minute view mode)
+        // In second view mode, GPS data is dispatched separately from perSecondData processing
+        if (!isSecondViewMode) {
+          const gpsData = payload?.gpsPerSecond || payload?.gps_per_second || payload?.gps || payload?.locations || payload?.gpsPoints || payload?.track || payload?.route || null;
+          if (Array.isArray(gpsData) && gpsData.length > 0) {
+            console.log('📍 Dispatching GPS data to MapComponent (minute view):', gpsData.length, 'points');
+            
+            // Process GPS data - convert time strings to timestamps if needed
+            const baseDate = new Date(selectedDate);
+            baseDate.setHours(0, 0, 0, 0);
+            
+            const processedGpsData = gpsData.map((point: any) => {
+              let timeNum: number;
+              if (typeof point.time === 'number') {
+                timeNum = point.time;
+              } else if (typeof point.time === 'string') {
+                // Check if it's HH:mm:ss format
+                if (point.time.match(/^\d{2}:\d{2}:\d{2}$/)) {
+                  const [hh, mm, ss] = point.time.split(':').map(Number);
+                  timeNum = baseDate.getTime() + (hh || 0) * 3600000 + (mm || 0) * 60000 + (ss || 0) * 1000;
+                } else {
+                  timeNum = Date.parse(point.time) || Date.now();
+                }
+              } else {
+                timeNum = point.timestamp || point.timeStamp || Date.now();
+              }
+              
+              return {
+                ...point,
+                time: timeNum,
+                lat: point.lat,
+                lng: point.lng,
+                speed: point.speed,
+                heading: point.heading
+              };
+            }).sort((a: any, b: any) => a.time - b.time);
+            
+            window.dispatchEvent(new CustomEvent('gps:data', { 
+              detail: { gpsData: processedGpsData } 
+            }));
+          } else {
+            console.log('📍 No GPS data found in payload to dispatch');
+          }
+        }
         
         // Handle empty/null data
         if (!payload || (!payload.timestamps && !payload.gpsPerSecond && !payload.digitalPerSecond && !payload.analogPerMinute)) {
@@ -550,6 +1111,17 @@ const VehicleDashboard: React.FC = () => {
             });
             
             if (chartType === 'digital') {
+              // Check display field - only exclude if explicitly false
+              const displayValue = firstReading.display;
+              // Only filter out if display is explicitly false (boolean or string)
+              const isExplicitlyFalse = displayValue === false || displayValue === 'false' || displayValue === 'False' || displayValue === 'FALSE';
+              
+              if (isExplicitlyFalse) {
+                console.log('🚫 Filtered out digital signal (display=false):', chartName, 'display value:', displayValue);
+                return;
+              }
+              // Include all others (true, undefined, null, or any other value)
+              
               // Digital signal
               const values: number[] = [];
               const times: string[] = [];
@@ -568,18 +1140,29 @@ const VehicleDashboard: React.FC = () => {
                 chartType: 'Digital'
               });
             } else if (chartType === 'analogue' || chartType === 'analog') {
+              // Check display field - only include if display is true (or undefined for backward compatibility)
+              const shouldDisplay = firstReading.display !== false;
+              if (!shouldDisplay) {
+                console.log('🚫 Filtered out analog signal (display=false):', chartName);
+                return;
+              }
+              
               // Analog signal
-              const avgValues: number[] = [];
-              const minValues: number[] = [];
-              const maxValues: number[] = [];
+              const avgValues: (number | null)[] = [];
+              const minValues: (number | null)[] = [];
+              const maxValues: (number | null)[] = [];
               const times: string[] = [];
               
               readings.forEach((r: any) => {
                 const timeStr = r.date_time || `${r.date} ${r.time}`;
                 times.push(timeStr);
-                avgValues.push(Number(r.avg ?? 0));
-                minValues.push(Number(r.min ?? r.avg ?? 0));
-                maxValues.push(Number(r.max ?? r.avg ?? 0));
+                // Use null for missing values so line doesn't connect through missing data
+                const avgVal = r.avg != null ? Number(r.avg) : null;
+                const minVal = r.min != null ? Number(r.min) : (r.avg != null ? Number(r.avg) : null);
+                const maxVal = r.max != null ? Number(r.max) : (r.avg != null ? Number(r.avg) : null);
+                avgValues.push(avgVal != null && Number.isFinite(avgVal) && !isNaN(avgVal) ? avgVal : null);
+                minValues.push(minVal != null && Number.isFinite(minVal) && !isNaN(minVal) ? minVal : null);
+                maxValues.push(maxVal != null && Number.isFinite(maxVal) && !isNaN(maxVal) ? maxVal : null);
               });
               
               analogSignals.push({
@@ -599,8 +1182,22 @@ const VehicleDashboard: React.FC = () => {
           console.log('Analog signals:', analogSignals);
           console.groupEnd();
           
-          // Replace payload with grouped structure
-          if (digitalSignals.length > 0) (payload as any).digitalSignals = digitalSignals;
+          // Sort digital signals by ID number in ascending order, then reverse
+          // This puts D64 at index 0 (bottom) and D44 at last index (top)
+          if (digitalSignals.length > 0) {
+            digitalSignals.sort((a, b) => {
+              const getNumericId = (signal: any): number => {
+                const id = String(signal.id || signal.name || '');
+                const match = id.match(/\d+/);
+                return match ? parseInt(match[0], 10) : 0;
+              };
+              const numA = getNumericId(a);
+              const numB = getNumericId(b);
+              // Sort ascending first (D44, D46, ..., D64)
+              return numA - numB;
+            }).reverse(); // Reverse so D64 is at index 0 (bottom) and D44 is at last index (top)
+            (payload as any).digitalSignals = digitalSignals;
+          }
           if (analogSignals.length > 0) (payload as any).analogSignals = analogSignals;
         }
         
@@ -662,44 +1259,67 @@ const VehicleDashboard: React.FC = () => {
         });
 
         // Create series mapping function that uses exact API values and aligned timestamps
-        const toSeries = (values: number[], timestamps?: number[]): Array<{ time: Date; value: number }> => {
+        // Skip data points with null/invalid values so line doesn't render at missing time points
+        const toSeries = (values: (number | null)[], timestamps?: number[]): Array<{ time: Date; value: number }> => {
           const usedTimes = timestamps || times;
-          const points = values.map((v: number, idx: number) => {
-            const timestamp = usedTimes[idx];
-            if (!Number.isFinite(timestamp)) return null;
-            const alignedTs = alignToMinute(timestamp);
-            return { time: new Date(alignedTs), value: Number(v) };
-          }).filter((p): p is { time: Date; value: number } => p !== null);
+          const points = values
+            .map((v: number | null, idx: number) => {
+              const timestamp = usedTimes[idx];
+              if (!Number.isFinite(timestamp)) return null;
+              const alignedTs = alignToMinute(timestamp);
+              const numValue = v != null ? Number(v) : null;
+              // Skip data point if value is invalid (return null)
+              // This prevents creating data points for missing time slots
+              if (numValue == null || !Number.isFinite(numValue) || isNaN(numValue)) {
+                return null;
+              }
+              return { time: new Date(alignedTs), value: numValue };
+            })
+            .filter((p): p is { time: Date; value: number } => p !== null);
           
           // Sort by timestamp ascending
           return points.sort((a, b) => a.time.getTime() - b.time.getTime());
         };
 
         // Create triplet series with exact API values (no scaling)
+        // Skip data points with null/invalid avg values so line doesn't render at missing time points
         const toSeriesTriplet = (
-          avgVals: number[], 
-          minVals?: number[] | null, 
-          maxVals?: number[] | null,
+          avgVals: (number | null)[], 
+          minVals?: (number | null)[] | null, 
+          maxVals?: (number | null)[] | null,
           timestamps?: number[]
-        ): Array<{ time: Date; avg: number; min: number; max: number }> => {
+        ): Array<{ time: Date; avg: number; min: number | null; max: number | null }> => {
           const usedTimes = timestamps || times;
-          const points = avgVals.map((v: number, idx: number) => {
+          const validPoints: Array<{ time: Date; avg: number; min: number | null; max: number | null }> = [];
+          
+          avgVals.forEach((v: number | null, idx: number) => {
             const timestamp = usedTimes[idx];
-            if (!Number.isFinite(timestamp)) return null;
+            if (!Number.isFinite(timestamp)) return;
             const alignedTs = alignToMinute(timestamp);
-            const avg = Number(v);
-            const min = minVals && idx < minVals.length ? Number(minVals[idx]) : avg;
-            const max = maxVals && idx < maxVals.length ? Number(maxVals[idx]) : avg;
-            return {
+            const avgNum = v != null ? Number(v) : null;
+            
+            // If avg is null/invalid, skip this data point entirely
+            // This prevents creating data points for missing time slots
+            if (avgNum == null || !Number.isFinite(avgNum) || isNaN(avgNum)) {
+              return;
+            }
+            
+            // Process min and max - use avgNum as fallback if not available
+            const minVal = minVals && idx < minVals.length ? minVals[idx] : null;
+            const maxVal = maxVals && idx < maxVals.length ? maxVals[idx] : null;
+            const minNum = minVal != null ? Number(minVal) : null;
+            const maxNum = maxVal != null ? Number(maxVal) : null;
+            
+            validPoints.push({
               time: new Date(alignedTs),
-              avg: Number.isFinite(avg) ? avg : 0,
-              min: Number.isFinite(min) ? min : avg,
-              max: Number.isFinite(max) ? max : avg
-            };
-          }).filter((p): p is { time: Date; avg: number; min: number; max: number } => p !== null);
+              avg: avgNum,
+              min: (minNum != null && Number.isFinite(minNum) && !isNaN(minNum)) ? minNum : avgNum,
+              max: (maxNum != null && Number.isFinite(maxNum) && !isNaN(maxNum)) ? maxNum : avgNum
+            });
+          });
           
           // Sort by timestamp ascending
-          return points.sort((a, b) => a.time.getTime() - b.time.getTime());
+          return validPoints.sort((a, b) => a.time.getTime() - b.time.getTime());
         };
 
         const digitalSignalsRaw = pick('digitalSignals', 'digitals', 'digital') || [];
@@ -708,6 +1328,7 @@ const VehicleDashboard: React.FC = () => {
         digitalSignalsRaw.forEach((s: any, idx: number) => {
           console.group(`📊 Digital Signal ${idx + 1} - Raw API Data: ${s.name || s.id || 'Unknown'}`);
           console.log('Complete API Object:', JSON.stringify(s, null, 2));
+          console.log('Display field:', s.display, 'type:', typeof s.display);
           console.log('Values array (first 20):', s.values?.slice(0, 20));
           console.log('Values array (last 20):', s.values?.slice(-20));
           console.log('Total values count:', s.values?.length || 0);
@@ -716,10 +1337,42 @@ const VehicleDashboard: React.FC = () => {
         });
         console.groupEnd();
 
+        // Sort digital signals by ID number in ascending order, then reverse
+        // This puts D64 at index 0 (bottom) and D44 at last index (top)
+        // Filter by display field first, then sort
+        // Only exclude if display is explicitly false (boolean or string), otherwise include
+        const filteredDigitalSignals = digitalSignalsRaw.filter((s: any) => {
+          const displayValue = s.display;
+          // Only filter out if display is explicitly false (boolean or string)
+          const isExplicitlyFalse = displayValue === false || displayValue === 'false' || displayValue === 'False' || displayValue === 'FALSE';
+          
+          if (isExplicitlyFalse) {
+            console.log('🚫 Filtered out digital signal (display=false):', s.id || s.name, 'display value:', displayValue);
+            return false;
+          }
+          // Include all others (true, undefined, null, or any other value)
+          return true;
+        });
+        
+        const sortedDigitalSignals = [...filteredDigitalSignals].sort((a, b) => {
+          // Extract numeric part from ID (e.g., "D64" -> 64, "D44" -> 44)
+          const getNumericId = (signal: any): number => {
+            const id = String(signal.id || signal.name || '');
+            const match = id.match(/\d+/);
+            return match ? parseInt(match[0], 10) : 0;
+          };
+          const numA = getNumericId(a);
+          const numB = getNumericId(b);
+          // Sort ascending first (D44, D46, ..., D64)
+          return numA - numB;
+        }).reverse(); // Reverse so D64 is at index 0 (bottom) and D44 is at last index (top)
+        
+        console.log('📊 Sorted digital signals order (D64 at bottom, D44 at top):', sortedDigitalSignals.map(s => s.id || s.name));
+
         let digitalChart: DigitalStatusChart = {
           id: 'digital-status',
           name: 'Digital Status Indicators',
-          metrics: digitalSignalsRaw.map((s: any, idx: number) => {
+          metrics: sortedDigitalSignals.map((s: any, idx: number) => {
             
             // Handle both string times (from flat array) and numeric timestamps
             let signalTimes: any[] = s.times || s.timeStamps || s.timestamps || [];
@@ -740,7 +1393,9 @@ const VehicleDashboard: React.FC = () => {
             // Use original API values directly - no inversion applied
             const values = s.values || [];
             
-            const data = toSeries(values, normalizedSignalTimes);
+            const dataWithNulls = toSeries(values, normalizedSignalTimes);
+            // Filter out null values for digital signals (they should always be 0 or 1)
+            const data = dataWithNulls.filter((d): d is { time: Date; value: number } => d.value !== null);
             
             return {
               id: String(s.id),
@@ -771,7 +1426,16 @@ const VehicleDashboard: React.FC = () => {
         });
         console.groupEnd();
 
-        const analogMetrics: VehicleMetric[] = analogSignalsArr.map((s: any, idx: number) => {
+        const analogMetrics: VehicleMetric[] = analogSignalsArr
+          .filter((s: any) => {
+            // Check display field - only include if display is true (or undefined for backward compatibility)
+            const shouldDisplay = s.display !== false;
+            if (!shouldDisplay) {
+              console.log('🚫 Filtered out analog signal (display=false):', s.id || s.name);
+            }
+            return shouldDisplay;
+          })
+          .map((s: any, idx: number) => {
           // Extract resolution and offset from signal
           const resolution = Number(s.resolution ?? 1); // Default to 1 if not provided
           const offset = Number(s.offset ?? 0); // Default to 0 if not provided
@@ -787,27 +1451,29 @@ const VehicleDashboard: React.FC = () => {
             return (numValue * resolution) + offset;
           };
           
-          // Use exact API values - filter out invalid values immediately to prevent NaN
+          // Use exact API values - preserve null for missing data so line doesn't connect
           // Apply resolution and offset transformation
-          const avgRaw: number[] = (s.values ?? s.avg ?? s.average ?? [])
+          const avgRaw: (number | null)[] = (s.values ?? s.avg ?? s.average ?? [])
             .map((v: any) => {
+              if (v == null) return null;
               const num = Number(v);
               const valid = Number.isFinite(num) && !isNaN(num) ? num : null;
               return applyTransformation(valid);
-            })
-            .filter((v: number | null): v is number => v !== null);
+            });
           
-          const minsRaw: number[] | undefined = (s.mins ?? s.minValues ?? s.min ?? null)?.map?.((v: any) => {
+          const minsRaw: (number | null)[] | undefined = (s.mins ?? s.minValues ?? s.min ?? null)?.map?.((v: any) => {
+            if (v == null) return null;
             const num = Number(v);
             const valid = Number.isFinite(num) && !isNaN(num) ? num : null;
             return applyTransformation(valid);
-          })?.filter((v: number | null): v is number => v !== null);
+          });
           
-          const maxsRaw: number[] | undefined = (s.maxs ?? s.maxValues ?? s.max ?? null)?.map?.((v: any) => {
+          const maxsRaw: (number | null)[] | undefined = (s.maxs ?? s.maxValues ?? s.max ?? null)?.map?.((v: any) => {
+            if (v == null) return null;
             const num = Number(v);
             const valid = Number.isFinite(num) && !isNaN(num) ? num : null;
             return applyTransformation(valid);
-          })?.filter((v: number | null): v is number => v !== null);
+          });
           
           // Get signal-specific timestamps if available, otherwise use global times
           let signalTimes: any[] = s.times || s.timeStamps || s.timestamps || [];
@@ -912,13 +1578,24 @@ const VehicleDashboard: React.FC = () => {
           console.log('API Max Values (after transformation):', maxsRaw);
           console.log('Filtered Values:', values);
           console.log('Calculated Stats (after transformation):', { avg: avgValue, min: minValue, max: maxValue });
+          
+          // Debug: Log color information from API
+          console.log('🔍 Color info from API (analogSignalsArr):', {
+            color: s.color,
+            min_color: s.min_color,
+            max_color: s.max_color,
+            hasMinColor: !!s.min_color,
+            hasMaxColor: !!s.max_color
+          });
           console.groupEnd();
           
-          return {
+          const metric = {
             id: String(s.id),
             name: String(s.name ?? s.id),
             unit: String(s.unit ?? ''),
             color: String(s.color ?? '#3b82f6'),
+            min_color: s.min_color ? String(s.min_color) : undefined,
+            max_color: s.max_color ? String(s.max_color) : undefined,
             data: data as any,
             currentValue: values.length > 0 ? values[values.length - 1] : 0,
             avg: avgValue,
@@ -926,6 +1603,17 @@ const VehicleDashboard: React.FC = () => {
             max: maxValue,
             yAxisRange: s.yAxisRange ? { min: Number(s.yAxisRange.min), max: Number(s.yAxisRange.max) } : { min: 0, max: 100 }
           } as VehicleMetric;
+          
+          // Debug: Log what we're setting
+          console.log('✅ Metric being created (analogSignalsArr):', {
+            id: metric.id,
+            min_color: metric.min_color,
+            max_color: metric.max_color,
+            hasMinColor: !!metric.min_color,
+            hasMaxColor: !!metric.max_color
+          });
+          
+          return metric;
         });
 
         // Optional per-second analog data embedded in telemetry.json
@@ -955,18 +1643,58 @@ const VehicleDashboard: React.FC = () => {
             // Align to minute boundary
             return new Date(alignToMinute(timestamp));
           };
-          const metrics = (payload.digitalPerSecond as Array<any>).map((series: any, idx: number) => {
+          // Filter by display field first
+          // Only exclude if display is explicitly false (boolean or string), otherwise include
+          const filteredDigitalPerSecond = (payload.digitalPerSecond as Array<any>).filter((series: any) => {
+            const displayValue = series.display;
+            // Only filter out if display is explicitly false (boolean or string)
+            const isExplicitlyFalse = displayValue === false || displayValue === 'false' || displayValue === 'False' || displayValue === 'FALSE';
+            
+            if (isExplicitlyFalse) {
+              console.log('🚫 Filtered out digital per-second signal (display=false):', series.id || series.name, 'display value:', displayValue);
+              return false;
+            }
+            // Include all others (true, undefined, null, or any other value)
+            return true;
+          });
+          
+          const metrics = filteredDigitalPerSecond.map((series: any, idx: number) => {
             // Use exact API values directly - no processing
+            // Log raw API data for verification
+            console.group(`📡 Digital Signal API Data: ${series.name || series.id} (${series.id})`);
+            console.log('Raw API points:', series.points);
+            console.log('Total points:', (series.points || []).length);
+            
             const pts = (series.points || []).map((p: any) => {
               const value = Number(p.value ?? 0);
+              const timeDate = parseHMS(p.time);
               return {
-                time: parseHMS(p.time),
-                value
+                time: timeDate,
+              value, // Exact API value: 0 or 1
+                rawTime: p.time, // Keep original time string for reference
+                rawValue: p.value // Keep original value for reference
               };
             });
             
             // Sort by timestamp
             pts.sort((a: { time: Date; value: number }, b: { time: Date; value: number }) => a.time.getTime() - b.time.getTime());
+            
+            // Log processed points with exact values
+            console.log('Processed points (first 20):', pts.slice(0, 20).map((p:any) => ({
+              time: format(p.time, 'HH:mm:ss'),
+              timestamp: p.time.getTime(),
+              value: p.value,
+              status: p.value === 1 ? 'ON' : 'OFF',
+              rawTime: p.rawTime,
+              rawValue: p.rawValue
+            })));
+            console.log('Processed points (last 10):', pts.slice(-10).map((p: { time: Date; value: number; rawTime: string; rawValue: any }) => ({
+              time: format(p.time, 'HH:mm:ss'),
+              timestamp: p.time.getTime(),
+              value: p.value,
+              status: p.value === 1 ? 'ON' : 'OFF'
+            })));
+            console.groupEnd();
             
             if (pts.length) {
               const localMin = pts[0].time.getTime();
@@ -1000,8 +1728,26 @@ const VehicleDashboard: React.FC = () => {
             // Align to minute boundary
             return new Date(alignToMinute(timestamp));
           };
-          (payload.analogPerSecond as Array<any>).forEach(series => {
+          (payload.analogPerSecond as Array<any>)
+            .filter((series: any) => {
+              // Check display field - only include if display is true (or undefined for backward compatibility)
+              const shouldDisplay = series.display !== false;
+              if (!shouldDisplay) {
+                console.log('🚫 Filtered out analog per-second signal (display=false):', series.id || series.name);
+              }
+              return shouldDisplay;
+            })
+            .forEach(series => {
             const id = String(series.id);
+            
+            // Debug: Log color information from API
+            console.log(`🔍 analogPerSecond - Color info from API for ${id}:`, {
+              color: series.color,
+              min_color: series.min_color,
+              max_color: series.max_color,
+              hasMinColor: !!series.min_color,
+              hasMaxColor: !!series.max_color
+            });
             
             // Extract resolution and offset from series
             const resolution = Number(series.resolution ?? 1); // Default to 1 if not provided
@@ -1009,21 +1755,24 @@ const VehicleDashboard: React.FC = () => {
             
             // Helper function to apply resolution and offset transformation
             // Apply to all valid numeric values (including 0 and negative values)
-            const applyTransformation = (value: number | null | undefined): number => {
-              if (value === null || value === undefined) return 0;
+            // Return null for missing/invalid values so line doesn't connect through missing data
+            const applyTransformation = (value: number | null | undefined): number | null => {
+              if (value === null || value === undefined) return null;
               const numValue = Number(value);
-              if (!Number.isFinite(numValue)) return 0;
+              if (!Number.isFinite(numValue) || isNaN(numValue)) return null;
               // Apply transformation: (value * resolution) + offset
               // Apply to all valid numeric values
               return (numValue * resolution) + offset;
             };
             
             // Use exact API values, apply resolution and offset, align timestamps to minutes
+            // Use null for missing avg/min/max values so line doesn't connect through missing data
             const rawPts = (series.points || []).map((r: any) => {
               const time = parseHMS(r.time);
+              // If avg is missing, use null; if min/max are missing, use null or avg if available
               const avgRaw = r.avg !== null && r.avg !== undefined ? Number(r.avg) : null;
-              const minRaw = r.min !== null && r.min !== undefined ? Number(r.min) : null;
-              const maxRaw = r.max !== null && r.max !== undefined ? Number(r.max) : null;
+              const minRaw = r.min !== null && r.min !== undefined ? Number(r.min) : (r.avg !== null && r.avg !== undefined ? Number(r.avg) : null);
+              const maxRaw = r.max !== null && r.max !== undefined ? Number(r.max) : (r.avg !== null && r.avg !== undefined ? Number(r.avg) : null);
               
               // Apply transformation to avg, min, max
               const avg = applyTransformation(avgRaw);
@@ -1032,30 +1781,27 @@ const VehicleDashboard: React.FC = () => {
               
               return {
                 time,
-                avg: Number.isFinite(avg) ? avg : 0,
-                min: Number.isFinite(min) ? min : 0,
-                max: Number.isFinite(max) ? max : 0,
+                avg: (avg != null && Number.isFinite(avg) && !isNaN(avg)) ? avg : null,
+                min: (min != null && Number.isFinite(min) && !isNaN(min)) ? min : null,
+                max: (max != null && Number.isFinite(max) && !isNaN(max)) ? max : null,
                 hms: String(r.time)
               };
             });
             
             // Sort by timestamp
-            rawPts.sort((a: { time: Date; avg: number; min: number; max: number; hms: string }, b: { time: Date; avg: number; min: number; max: number; hms: string }) => a.time.getTime() - b.time.getTime());
+            rawPts.sort((a: { time: Date; avg: number | null; min: number | null; max: number | null; hms: string }, b: { time: Date; avg: number | null; min: number | null; max: number | null; hms: string }) => a.time.getTime() - b.time.getTime());
             
             if (!rawPts.length) return;
             const localMin = rawPts[0].time.getTime();
             const localMax = rawPts[rawPts.length - 1].time.getTime();
             perSecondAnalogMinTs = perSecondAnalogMinTs === null ? localMin : Math.min(perSecondAnalogMinTs, localMin);
             perSecondAnalogMaxTs = perSecondAnalogMaxTs === null ? localMax : Math.max(perSecondAnalogMaxTs, localMax);
-            const values: number[] = rawPts.map((p: { time: Date; avg: number; min: number; max: number; hms: string }) => p.avg)
-              .map((v: any) => Number(v))
-              .filter((v: number) => Number.isFinite(v) && !isNaN(v));
-            const allMins = rawPts.map((p: { time: Date; avg: number; min: number; max: number; hms: string }) => p.min)
-              .map((v: any) => Number(v))
-              .filter((v: number) => Number.isFinite(v) && !isNaN(v));
-            const allMaxs = rawPts.map((p: { time: Date; avg: number; min: number; max: number; hms: string }) => p.max)
-              .map((v: any) => Number(v))
-              .filter((v: number) => Number.isFinite(v) && !isNaN(v));
+            const values: number[] = rawPts.map((p: { time: Date; avg: number | null; min: number | null; max: number | null; hms: string }) => p.avg)
+              .filter((v: number | null): v is number => v != null && Number.isFinite(v) && !isNaN(v));
+            const allMins = rawPts.map((p: { time: Date; avg: number | null; min: number | null; max: number | null; hms: string }) => p.min)
+              .filter((v: number | null): v is number => v != null && Number.isFinite(v) && !isNaN(v));
+            const allMaxs = rawPts.map((p: { time: Date; avg: number | null; min: number | null; max: number | null; hms: string }) => p.max)
+              .filter((v: number | null): v is number => v != null && Number.isFinite(v) && !isNaN(v));
             
             // Calculate range safely
             const minVal = allMins.length > 0 ? Math.min(...allMins) : (values.length > 0 ? Math.min(...values) : 0);
@@ -1088,19 +1834,34 @@ const VehicleDashboard: React.FC = () => {
               existing.min = safeMin;
               existing.max = safeMax;
               (existing as any).yAxisRange = usedRange;
+              // Update colors if they exist
+              if (series.min_color) (existing as any).min_color = String(series.min_color);
+              if (series.max_color) (existing as any).max_color = String(series.max_color);
             } else {
-              analogMetrics.push({
+              const metric = {
                 id,
                 name: String(series.name ?? id),
                 unit: String(series.unit ?? ''),
                 color: String(series.color ?? '#2563eb'),
+                min_color: series.min_color ? String(series.min_color) : undefined,
+                max_color: series.max_color ? String(series.max_color) : undefined,
                 data: rawPts as any,
                 currentValue: values.length > 0 ? values[values.length - 1] : 0,
                 avg: safeAvg,
                 min: safeMin,
                 max: safeMax,
                 yAxisRange: usedRange
+              };
+              
+              // Debug: Log what we're setting
+              console.log(`✅ analogPerSecond - Metric being created for ${id}:`, {
+                min_color: metric.min_color,
+                max_color: metric.max_color,
+                hasMinColor: !!metric.min_color,
+                hasMaxColor: !!metric.max_color
               });
+              
+              analogMetrics.push(metric);
             }
           });
         }
@@ -1122,9 +1883,27 @@ const VehicleDashboard: React.FC = () => {
             // Align to minute boundary
             return new Date(alignToMinute(timestamp));
           };
-          (payload.analogPerMinute as Array<any>).forEach((series: any, idx: number) => {
+          (payload.analogPerMinute as Array<any>)
+            .filter((series: any) => {
+              // Check display field - only include if display is true (or undefined for backward compatibility)
+              const shouldDisplay = series.display !== false;
+              if (!shouldDisplay) {
+                console.log('🚫 Filtered out analog per-minute signal (display=false):', series.id || series.name);
+              }
+              return shouldDisplay;
+            })
+            .forEach((series: any, idx: number) => {
             console.group(`Analog Per-Minute Series ${idx + 1}: ${series.id || series.name || 'Unknown'}`);
             const id = String(series.id);
+            
+            // Debug: Log color information from API
+            console.log('🔍 Color info from API:', {
+              color: series.color,
+              min_color: series.min_color,
+              max_color: series.max_color,
+              hasMinColor: !!series.min_color,
+              hasMaxColor: !!series.max_color
+            });
             
             // Extract resolution and offset from series
             const resolution = Number(series.resolution ?? 1); // Default to 1 if not provided
@@ -1132,40 +1911,41 @@ const VehicleDashboard: React.FC = () => {
             
             // Helper function to apply resolution and offset transformation
             // Apply to all valid numeric values (including 0 and negative values)
-            const applyTransformation = (value: number | null | undefined): number => {
-              if (value === null || value === undefined) return 0;
+            // Return null for missing/invalid values so line doesn't connect through missing data
+            const applyTransformation = (value: number | null | undefined): number | null => {
+              if (value === null || value === undefined) return null;
               const numValue = Number(value);
-              if (!Number.isFinite(numValue)) return 0;
+              if (!Number.isFinite(numValue) || isNaN(numValue)) return null;
               // Apply transformation: (value * resolution) + offset
               // Apply to all valid numeric values
               return (numValue * resolution) + offset;
             };
             
             // Use exact API values, apply resolution and offset, align timestamps to minutes
-            const rawPts = (series.points || [])
-              .filter((r: any) => r.avg !== null && r.avg !== undefined) // Filter out null values
-              .map((r: any) => {
-                const time = parseHMS(r.time);
-                const avgRaw = r.avg !== null && r.avg !== undefined ? Number(r.avg) : null;
-                const minRaw = r.min !== null && r.min !== undefined ? Number(r.min) : null;
-                const maxRaw = r.max !== null && r.max !== undefined ? Number(r.max) : null;
-                
-                // Apply transformation to avg, min, max
-                const avg = applyTransformation(avgRaw);
-                const min = applyTransformation(minRaw !== null ? minRaw : avgRaw); // Use avg if min not provided
-                const max = applyTransformation(maxRaw !== null ? maxRaw : avgRaw); // Use avg if max not provided
-                
-                return {
-                  time,
-                  avg: Number.isFinite(avg) ? avg : 0,
-                  min: Number.isFinite(min) ? min : 0,
-                  max: Number.isFinite(max) ? max : 0,
-                  hms: String(r.time)
-                };
-              });
+            // Use null for missing avg/min/max values so line doesn't connect through missing data
+            const rawPts = (series.points || []).map((r: any) => {
+              const time = parseHMS(r.time);
+              // If avg is missing, use null; if min/max are missing, use null or avg if available
+              const avgRaw = r.avg !== null && r.avg !== undefined ? Number(r.avg) : null;
+              const minRaw = r.min !== null && r.min !== undefined ? Number(r.min) : (r.avg !== null && r.avg !== undefined ? Number(r.avg) : null);
+              const maxRaw = r.max !== null && r.max !== undefined ? Number(r.max) : (r.avg !== null && r.avg !== undefined ? Number(r.avg) : null);
+              
+              // Apply transformation to avg, min, max
+              const avg = applyTransformation(avgRaw);
+              const min = applyTransformation(minRaw);
+              const max = applyTransformation(maxRaw);
+              
+              return {
+                time,
+                avg: (avg != null && Number.isFinite(avg) && !isNaN(avg)) ? avg : null,
+                min: (min != null && Number.isFinite(min) && !isNaN(min)) ? min : null,
+                max: (max != null && Number.isFinite(max) && !isNaN(max)) ? max : null,
+                hms: String(r.time)
+              };
+            });
             
             // Sort by timestamp
-            rawPts.sort((a: { time: Date; avg: number; min: number; max: number; hms: string }, b: { time: Date; avg: number; min: number; max: number; hms: string }) => a.time.getTime() - b.time.getTime());
+            rawPts.sort((a: { time: Date; avg: number | null; min: number | null; max: number | null; hms: string }, b: { time: Date; avg: number | null; min: number | null; max: number | null; hms: string }) => a.time.getTime() - b.time.getTime());
             
             if (!rawPts.length) {
               console.warn('No points in series, skipping');
@@ -1176,15 +1956,12 @@ const VehicleDashboard: React.FC = () => {
             const localMax = rawPts[rawPts.length - 1].time.getTime();
             perSecondAnalogMinTs = perSecondAnalogMinTs === null ? localMin : Math.min(perSecondAnalogMinTs, localMin);
             perSecondAnalogMaxTs = perSecondAnalogMaxTs === null ? localMax : Math.max(perSecondAnalogMaxTs, localMax);
-            const values: number[] = rawPts.map((p: { time: Date; avg: number; min: number; max: number; hms: string }) => p.avg)
-              .map((v: any) => Number(v))
-              .filter((v: number) => Number.isFinite(v) && !isNaN(v));
-            const allMins = rawPts.map((p: { time: Date; avg: number; min: number; max: number; hms: string }) => p.min)
-              .map((v: any) => Number(v))
-              .filter((v: number) => Number.isFinite(v) && !isNaN(v));
-            const allMaxs = rawPts.map((p: { time: Date; avg: number; min: number; max: number; hms: string }) => p.max)
-              .map((v: any) => Number(v))
-              .filter((v: number) => Number.isFinite(v) && !isNaN(v));
+            const values: number[] = rawPts.map((p: { time: Date; avg: number | null; min: number | null; max: number | null; hms: string }) => p.avg)
+              .filter((v: number | null): v is number => v != null && Number.isFinite(v) && !isNaN(v));
+            const allMins = rawPts.map((p: { time: Date; avg: number | null; min: number | null; max: number | null; hms: string }) => p.min)
+              .filter((v: number | null): v is number => v != null && Number.isFinite(v) && !isNaN(v));
+            const allMaxs = rawPts.map((p: { time: Date; avg: number | null; min: number | null; max: number | null; hms: string }) => p.max)
+              .filter((v: number | null): v is number => v != null && Number.isFinite(v) && !isNaN(v));
             
             // Calculate range safely
             const minVal = allMins.length > 0 ? Math.min(...allMins) : (values.length > 0 ? Math.min(...values) : 0);
@@ -1200,18 +1977,31 @@ const VehicleDashboard: React.FC = () => {
             console.log('First 3 points (after transformation):', rawPts.slice(0, 3));
             console.groupEnd();
             
-            analogMetrics.push({
+            const metric = {
               id,
               name: String(series.name ?? id),
               unit: String(series.unit ?? ''),
               color: String(series.color ?? '#2563eb'),
+              min_color: series.min_color ? String(series.min_color) : undefined,
+              max_color: series.max_color ? String(series.max_color) : undefined,
               data: rawPts as any,
               currentValue: values.length > 0 ? values[values.length - 1] : 0,
               avg: safeAvg,
               min: safeMin,
               max: safeMax,
               yAxisRange: usedRange
+            };
+            
+            // Debug: Log what we're setting
+            console.log('✅ Metric being created:', {
+              id: metric.id,
+              min_color: metric.min_color,
+              max_color: metric.max_color,
+              hasMinColor: !!metric.min_color,
+              hasMaxColor: !!metric.max_color
             });
+            
+            analogMetrics.push(metric);
           });
           console.groupEnd();
         }
@@ -1235,6 +2025,7 @@ const VehicleDashboard: React.FC = () => {
           console.groupEnd();
         });
         console.log('Digital Chart Metrics Count:', digitalChart.metrics.length);
+        console.log('📊 Digital Chart - Final Signals Being Displayed:');
         digitalChart.metrics.forEach((metric, idx) => {
           console.group(`Final Digital Metric ${idx + 1}: ${metric.id} - ${metric.name}`);
           console.log('Data points count:', metric.data.length);
@@ -1242,6 +2033,7 @@ const VehicleDashboard: React.FC = () => {
           console.log('Last 3 data points:', metric.data.slice(-3));
           console.groupEnd();
         });
+        console.log('📊 All Digital Signal IDs in final chart:', digitalChart.metrics.map(m => m.id));
         console.groupEnd();
 
         // Set digital chart immediately if present
@@ -1392,11 +2184,71 @@ const VehicleDashboard: React.FC = () => {
     
     // Load data when vehicle and date are selected
     load();
-  }, [selectedVehicleId, selectedDate, showAssetModal]); // Reload when vehicle/date changes
+  }, [selectedVehicleId, selectedDate, showAssetModal, selectedHourRange, isSecondViewMode]); // Reload when vehicle/date/hour range changes, but skip if in second view mode
 
 
-  // Prepare scrubber data as a dense per-minute grid using the full available range
+  // Prepare scrubber data - per-second in second view mode, per-minute otherwise
   const scrubberData = useMemo(() => {
+    // In second view mode, use actual per-second timestamps from the data
+    if (isSecondViewMode && perSecondData && selectedHourRange) {
+      const baseDate = new Date(selectedDate);
+      baseDate.setHours(0, 0, 0, 0);
+      
+      // Get all unique timestamps from per-second data
+      const timestamps = new Set<number>();
+      
+      // Collect timestamps from analog per-second data
+      if (Array.isArray(perSecondData.analogPerSecond)) {
+        perSecondData.analogPerSecond.forEach((series: any) => {
+          (series.points || []).forEach((p: any) => {
+            const [hh, mm, ss] = (p.time || '00:00:00').split(':').map(Number);
+            const time = new Date(baseDate);
+            time.setHours(hh, mm, ss, 0);
+            timestamps.add(time.getTime());
+          });
+        });
+      }
+      
+      // Collect timestamps from digital per-second data
+      if (Array.isArray(perSecondData.digitalPerSecond)) {
+        perSecondData.digitalPerSecond.forEach((series: any) => {
+          (series.points || []).forEach((p: any) => {
+            const [hh, mm, ss] = (p.time || '00:00:00').split(':').map(Number);
+            const time = new Date(baseDate);
+            time.setHours(hh, mm, ss, 0);
+            timestamps.add(time.getTime());
+          });
+        });
+      }
+      
+      // Collect timestamps from GPS per-second data
+      if (Array.isArray(perSecondData.gpsPerSecond)) {
+        perSecondData.gpsPerSecond.forEach((point: any) => {
+          const [hh, mm, ss] = (point.time || '00:00:00').split(':').map(Number);
+          const time = new Date(baseDate);
+          time.setHours(hh, mm, ss, 0);
+          timestamps.add(time.getTime());
+        });
+      }
+      
+      // Filter to selected hour range and sort
+      const [startH, startM, startS] = selectedHourRange.start.split(':').map(Number);
+      const [endH, endM, endS] = selectedHourRange.end.split(':').map(Number);
+      
+      const startTime = new Date(baseDate);
+      startTime.setHours(startH, startM, startS, 0);
+      
+      const endTime = new Date(baseDate);
+      endTime.setHours(endH, endM, endS, 0);
+      
+      const filteredTimestamps = Array.from(timestamps)
+        .filter(t => t >= startTime.getTime() && t <= endTime.getTime())
+        .sort((a, b) => a - b);
+      
+      return filteredTimestamps.map(t => ({ time: t }));
+    }
+    
+    // Default: per-minute resolution
     // Prefer explicit selection range when available
     const candidateStarts: number[] = [];
     const candidateEnds: number[] = [];
@@ -1433,7 +2285,7 @@ const VehicleDashboard: React.FC = () => {
     }
     if (data.length === 0 || data[data.length - 1].time !== endTs) data.push({ time: endTs });
     return data;
-  }, [vehicleMetrics, digitalStatusChart, selectionStart, selectionEnd]);
+  }, [vehicleMetrics, digitalStatusChart, selectionStart, selectionEnd, isSecondViewMode, selectedHourRange, selectedDate, perSecondData]);
 
   // Calculate synchronized time domain from selection range
   const timeDomain = useMemo<[number, number] | null>(() => {
@@ -1480,10 +2332,14 @@ const VehicleDashboard: React.FC = () => {
       cancelAnimationFrame(rafRef.current);
     }
     
+    // In second view mode, use smaller throttle to allow second-by-second updates
+    // In minute view mode, use normal throttle
+    const throttleMs = isSecondViewMode ? 50 : THROTTLE_MS;
+    
     // Throttle updates to prevent excessive re-renders
-    if (now - lastUpdateRef.current >= THROTTLE_MS) {
-    setSelectedTime(new Date(timestamp));
-    setCrosshairActive(true);
+    if (now - lastUpdateRef.current >= throttleMs) {
+      setSelectedTime(new Date(timestamp));
+      setCrosshairActive(true);
       lastUpdateRef.current = now;
       rafRef.current = null;
     } else {
@@ -1495,15 +2351,16 @@ const VehicleDashboard: React.FC = () => {
         rafRef.current = null;
       });
     }
-  }, []);
+  }, [isSecondViewMode]);
 
   // Handle selection range change from scrubber
   const handleSelectionChange = useCallback((startTimestamp: number, endTimestamp: number) => {
     const start = new Date(startTimestamp);
     const end = new Date(endTimestamp);
     
-    // Enforce MIN 1 hour range
-    const minRangeMs = 60 * 60 * 1000; // 1 hour
+    // In second view mode: enforce MIN 10 minutes range
+    // In minute view mode: enforce MIN 1 hour range
+    const minRangeMs = isSecondViewMode ? (10 * 60 * 1000) : (60 * 60 * 1000); // 10 minutes or 1 hour
     const rangeMs = endTimestamp - startTimestamp;
     const newStart = start;
     let newEnd = end;
@@ -1516,29 +2373,37 @@ const VehicleDashboard: React.FC = () => {
     // Update selected time to center of range if needed
     const centerTime = new Date((newStart.getTime() + newEnd.getTime()) / 2);
     setSelectedTime(centerTime);
-  }, []);
+  }, [isSecondViewMode]);
 
   // Handle hover from scrubber
   const handleHover = useCallback((_timestamp: number | null) => {
     // Intentionally no-op: keep pointer/red-line fixed unless knob is dragged
   }, []);
 
+  // COMMENTED OUT ASSET MODAL - Using dummy data, showing graphs directly
   // Show asset selection modal first - always show if no valid selection
-  if (showAssetModal || !selectedVehicleId || !selectedDate) {
-    return <AssetSelectionModal onShowGraph={handleShowGraph} />;
-  }
+  // if (showAssetModal || !selectedVehicleId || !selectedDate) {
+  //   return <AssetSelectionModal onShowGraph={handleShowGraph} />;
+  // }
 
   return (
     <>
+    <ErrorModal
+      isOpen={errorModal.isOpen}
+      onClose={() => setErrorModal({ isOpen: false, message: '' })}
+      title="Something went wrong"
+      message={errorModal.message}
+      showRefresh={true}
+    />
     <div className={styles.dashboard}>
       <div className={styles.topPanel}>
         <div className={styles.headerBar}>
           <div className={styles.headerTitle}>Smart Data Link</div>
           <div className={styles.headerStatus}>
-            <span className={styles.headerLabel}>Time:</span>
-            <span className={styles.headerValue}>
+            {/* <span className={styles.headerLabel}>Time:</span> */}
+            {/* <span className={styles.headerValue}>
               {selectedTime ? format(selectedTime, 'HH:mm:ss') : '—'}
-            </span>
+            </span> */}
           </div>
         </div>
         {scrubberData.length > 0 && (
@@ -1550,6 +2415,7 @@ const VehicleDashboard: React.FC = () => {
             onTimeChange={handleTimeChange}
             onSelectionChange={handleSelectionChange}
             onHover={handleHover}
+            isSecondViewMode={isSecondViewMode}
           />
         )}
       </div>
@@ -1569,31 +2435,63 @@ const VehicleDashboard: React.FC = () => {
         )}
         <div className={styles.scrollContent}>
           {/* Digital Signal Timeline Chart */}
-          {digitalStatusChart && digitalStatusChart.metrics.length > 0 && (
-            <DigitalSignalTimeline
-              signals={digitalStatusChart.metrics.filter(m => (visibleDigital[m.id] ?? true))}
-              selectedTime={selectedTime}
-              crosshairActive={crosshairActive}
-              timeDomain={timeDomain}
-            />
-          )}
-
-          {/* Analog Charts */}
-          <div className={styles.chartsContainer}>
-            {vehicleMetrics.filter(m => (visibleAnalog[m.id] ?? true)).map(metric => (
-              <AnalogChart
-                key={metric.id}
-                id={metric.id}
-                name={metric.name}
-                unit={metric.unit}
-                color={metric.color}
-                data={metric.data}
-                yAxisRange={metric.yAxisRange}
+          <div id="digitalSignalContainer">
+            {digitalStatusChart && digitalStatusChart.metrics.length > 0 && (
+              <DigitalSignalTimeline
+                signals={digitalStatusChart.metrics.filter(m => forceAllChartsVisible || (visibleDigital[m.id] ?? true))}
                 selectedTime={selectedTime}
                 crosshairActive={crosshairActive}
                 timeDomain={timeDomain}
+                isSecondViewMode={isSecondViewMode}
               />
-            ))}
+            )}
+          </div>
+
+          {/* Analog Charts */}
+          <div id="analogChartsContainer" className={styles.chartsContainer} data-print-full-page={forceAllChartsVisible}>
+            {(() => {
+              // Debug: Log filter results
+              if (forceAllChartsVisible) {
+                console.log('🖨️ forceAllChartsVisible is TRUE - showing all', vehicleMetrics.length, 'charts');
+              }
+              const filtered = vehicleMetrics.filter(m => {
+                const shouldShow = forceAllChartsVisible || (visibleAnalog[m.id] ?? true);
+                if (!shouldShow && forceAllChartsVisible) {
+                  console.warn('🖨️ Chart filtered out despite forceAllChartsVisible:', m.id);
+                }
+                return shouldShow;
+              });
+              if (forceAllChartsVisible && filtered.length !== vehicleMetrics.length) {
+                console.error('🖨️ ERROR: Not all charts are visible! Expected:', vehicleMetrics.length, 'Got:', filtered.length);
+              }
+              return filtered;
+            })().map(metric => {
+              // Debug: Log what we're passing to AnalogChart
+              console.log(`📤 Passing to AnalogChart ${metric.id}:`, {
+                min_color: metric.min_color,
+                max_color: metric.max_color,
+                hasMinColor: !!metric.min_color,
+                hasMaxColor: !!metric.max_color
+              });
+              
+              return (
+                <AnalogChart
+                  key={metric.id}
+                  id={metric.id}
+                  name={metric.name}
+                  unit={metric.unit}
+                  color={metric.color}
+                  min_color={metric.min_color}
+                  max_color={metric.max_color}
+                  data={metric.data}
+                  yAxisRange={metric.yAxisRange}
+                  selectedTime={selectedTime}
+                  crosshairActive={crosshairActive}
+                  timeDomain={timeDomain}
+                  isSecondViewMode={isSecondViewMode}
+                />
+              );
+            })}
             
             {/* Processing progress indicator */}
             {loading && processingProgress > 0 && processingProgress < 100 && (

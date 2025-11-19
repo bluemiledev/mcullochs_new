@@ -4,7 +4,12 @@
   border-radius: 0;
   padding: 0;
   margin-bottom: 0;
+  margin-top: -116px;
+  margin-left: 10px;
+  margin-right: 0;
   box-shadow: none;
+  overflow: visible;
+  box-sizing: border-box;
 }
 
 .chartHeader {
@@ -24,10 +29,14 @@
 .chartWrapper {
   width: 100%;
   height: auto;
-  min-height: 220px;
+  min-height: 300px;
   margin-top: 0;
   margin-bottom: 0;
+  padding-top: 20px;
+  padding-bottom: 15px;
   position: relative;
+  overflow: visible;
+  max-height: none; /* Remove any max-height restrictions */
 }
 
 .chartRow {
@@ -57,15 +66,78 @@
   top: 0;
   bottom: 0;
   pointer-events: none;
+  z-index: 100;
+}
+
+.timeLabel {
+  position: absolute;
+  font-size: 10px;
+  font-weight: 600;
+  color: #1f2937;
+  background: rgba(255, 255, 255, 0.98);
+  padding: 3px 8px;
+  border-radius: 4px;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
+  border: 1px solid #e5e7eb;
+  z-index: 101;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  display: block;
+  visibility: visible;
+  opacity: 1;
+}
+
+.stickyTimeLabel {
+  position: absolute;
+  font-size: 10px;
+  font-weight: 600;
+  color: #1f2937;
+  background: rgba(255, 255, 255, 0.98);
+  padding: 3px 8px;
+  border-radius: 4px;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
+  border: 1px solid #e5e7eb;
+  z-index: 102;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  display: block;
+  visibility: visible;
+  opacity: 1;
+}
+
+.fixedTimeLabel {
+  position: fixed;
+  top: 10px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #1f2937;
+  background: rgba(255, 255, 255, 0.98);
+  padding: 3px 8px;
+  border-radius: 4px;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
+  border: 1px solid #e5e7eb;
+  z-index: 1000;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  display: block;
+  visibility: visible;
+  opacity: 1;
 }
 
 .rowStatus {
   position: absolute;
-  right: 32px;
+  right: 20px;
   font-size: 10px;
-  padding: 1px 6px;
+  padding: 2px 6px;
   border-radius: 4px;
   background: #f3f4f6;
+  white-space: nowrap;
+  line-height: 1.2;
+  z-index: 10;
+  pointer-events: none; /* Prevent labels from interfering with chart interactions */
 }
 
 .on { color: #10b981; font-weight: 700; }
@@ -146,4 +218,180 @@
   padding: 2px 4px;
   border-radius: 4px;
   background: #f3f4f6;
+}
+
+/* Responsive Styles */
+/* Small screens (phones) */
+@media (max-width: 640px) {
+  .container {
+    margin-top: -100px;
+  }
+
+  .chartWrapper {
+    padding-top: 15px;
+    padding-bottom: 10px;
+    min-height: 250px;
+  }
+
+  .rowStatus {
+    right: 10px;
+    font-size: 9px;
+    padding: 2px 4px;
+  }
+
+  .chartTitle {
+    font-size: 11px;
+  }
+}
+
+/* Medium screens (tablets) */
+@media (min-width: 641px) and (max-width: 1024px) {
+  .chartWrapper {
+    padding-top: 18px;
+    padding-bottom: 12px;
+  }
+
+  .rowStatus {
+    right: 15px;
+    font-size: 9.5px;
+  }
+}
+
+/* Large screens (desktops) */
+@media (min-width: 1025px) and (max-width: 1440px) {
+  .chartWrapper {
+    padding-top: 20px;
+    padding-bottom: 15px;
+  }
+
+  .rowStatus {
+    right: 20px;
+    font-size: 10px;
+  }
+}
+
+/* Extra large screens (large desktops) */
+@media (min-width: 1441px) and (max-width: 1920px) {
+  .chartWrapper {
+    padding-top: 24px;
+    padding-bottom: 18px;
+  }
+
+  .rowStatus {
+    right: 24px;
+    font-size: 11px;
+    padding: 3px 7px;
+  }
+
+  .chartTitle {
+    font-size: 13px;
+  }
+}
+
+/* Ultra-wide screens (4K and larger) */
+@media (min-width: 1921px) {
+  .chartWrapper {
+    padding-top: 28px;
+    padding-bottom: 20px;
+  }
+
+  .rowStatus {
+    right: 30px;
+    font-size: 12px;
+    padding: 4px 8px;
+  }
+
+  .chartTitle {
+    font-size: 14px;
+  }
+
+  .container {
+    max-width: 100%;
+  }
+}
+
+/* Print styles - ensure all labels are visible */
+@media print {
+  /* Ensure ON/OFF status labels are visible */
+  .rowStatus {
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    color: #1f2937 !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .on {
+    color: #10b981 !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .off {
+    color: #6b7280 !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Ensure time labels are visible */
+  .timeLabel,
+  .fixedTimeLabel,
+  .stickyTimeLabel {
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    color: #1f2937 !important;
+    background: rgba(255, 255, 255, 0.98) !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Ensure Y-axis labels (signal names) are visible */
+  .recharts-yAxis .recharts-cartesian-axis-tick-value,
+  .recharts-yAxis text {
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    fill: #1f2937 !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Ensure X-axis time labels are visible */
+  .recharts-xAxis .recharts-cartesian-axis-tick-value,
+  .recharts-xAxis text {
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    fill: #1f2937 !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Ensure all SVG text elements are visible */
+  svg text {
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    fill: #1f2937 !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Ensure chart container is visible */
+  .chartWrapper,
+  .container {
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    overflow: visible !important;
+  }
+
+  /* Ensure overlay with status labels is visible */
+  .overlay {
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+  }
 }
