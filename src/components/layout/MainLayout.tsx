@@ -7,22 +7,27 @@ import VehicleDashboard from '../../pages/VehicleDashboard';
 import TableReport from '../../pages/TableReport';
 import styles from './MainLayout.module.css';
 
+const DashboardContent: React.FC = () => (
+  <div className={styles.layout}>
+    <FilterControls />
+    <div className={styles.main}>
+      <MapComponent />
+      <div className={styles.content}>
+        <VehicleDashboard />
+      </div>
+    </div>
+  </div>
+);
+
 const MainLayout: React.FC = () => {
   return (
     <TimeProvider>
       <Routes>
         <Route path="/table" element={<TableReport />} />
-        <Route path="/" element={
-          <div className={styles.layout}>
-            <FilterControls />
-            <div className={styles.main}>
-              <MapComponent />
-              <div className={styles.content}>
-                <VehicleDashboard />
-              </div>
-            </div>
-          </div>
-        } />
+        <Route path="/charts" element={<DashboardContent />} />
+        <Route path="/charts/" element={<DashboardContent />} />
+        <Route path="/" element={<DashboardContent />} />
+        <Route path="*" element={<DashboardContent />} />
       </Routes>
     </TimeProvider>
   );

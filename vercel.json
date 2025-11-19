@@ -9,7 +9,7 @@
       "destination": "https://no-reply.com.au/smart_data_link/:path*"
     },
     {
-      "source": "/(.*)",
+      "source": "/((?!static/).*)",
       "destination": "/index.html"
     }
   ],
@@ -42,4 +42,3 @@
     }
   ]
 }
-
