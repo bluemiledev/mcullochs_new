@@ -7,7 +7,6 @@ import { processData as lttbDownsample } from 'downsample-lttb';
 let cachedProcessedData: {
   analogMetrics: any[];
   digitalMetrics: any[];
-  gpsData: any[];
   timestamps: number[];
   baseDate: Date;
 } | null = null;
@@ -154,23 +153,6 @@ export const processRawData = (rawData: any, selectedDate: string) => {
       });
   }
 
-  // Process GPS per-second data
-  const gpsData: any[] = [];
-  if (Array.isArray(rawData.gpsPerSecond)) {
-    rawData.gpsPerSecond.forEach((point: any) => {
-      const time = parseHMS(point.time || '00:00:00', baseDate);
-      gpsData.push({
-        ...point,
-        time,
-        lat: point.lat,
-        lng: point.lng,
-        speed: point.speed,
-        heading: point.heading,
-      });
-    });
-    gpsData.sort((a: any, b: any) => a.time - b.time);
-  }
-
   // Collect all timestamps
   const timestamps = new Set<number>();
   analogMetrics.forEach((m) => {
@@ -179,12 +161,10 @@ export const processRawData = (rawData: any, selectedDate: string) => {
   digitalMetrics.forEach((m) => {
     m.allPoints.forEach((p: any) => timestamps.add(p.time));
   });
-  gpsData.forEach((p: any) => timestamps.add(p.time));
 
   const result = {
     analogMetrics,
     digitalMetrics,
-    gpsData,
     timestamps: Array.from(timestamps).sort((a, b) => a - b),
     baseDate,
   };
@@ -266,7 +246,6 @@ export const getWindowedData = (
     return {
       analogMetrics: [],
       digitalMetrics: [],
-      gpsData: [],
       timestamps: [],
     };
   }
@@ -360,9 +339,6 @@ export const getWindowedData = (
     }
   });
 
-  // Process GPS data
-  const gpsData = filterPoints(cachedProcessedData.gpsData);
-
   // Get windowed timestamps
   const timestamps = cachedProcessedData.timestamps.filter(
     (t) => t >= paddedStart && t <= paddedEnd
@@ -371,7 +347,6 @@ export const getWindowedData = (
   return {
     analogMetrics,
     digitalMetrics,
-    gpsData: gpsData.map((p) => ({ ...p, time: new Date(p.time) })),
     timestamps,
   };
 };

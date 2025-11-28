@@ -4,6 +4,7 @@ import { DayPicker } from 'react-day-picker';
 import 'react-day-picker/dist/style.css';
 import styles from './FilterControls.module.css';
 import { formatDateForDisplay, formatDateForAPI } from '../utils';
+import McCullochsLogo from './McCullochsLogo';
 
 // Helper function to convert container (including SVG and overlays) to canvas
 const containerToCanvas = (container: HTMLElement): Promise<HTMLCanvasElement> => {
@@ -595,7 +596,7 @@ const FilterControls: React.FC = () => {
   const [selectedDate, setSelectedDate] = useState<string>('');
   const [showCalendar, setShowCalendar] = useState<boolean>(false);
   const calendarRef = useRef<HTMLDivElement>(null);
-  const [isSecondViewMode, setIsSecondViewMode] = useState<boolean>(false);
+  const [screenMode, setScreenMode] = useState<'Maintenance' | 'Drilling'>('Maintenance');
 
   // Read URL parameters on mount to auto-select device and date
   useEffect(() => {
@@ -657,6 +658,22 @@ const FilterControls: React.FC = () => {
     };
   }, [selectedVehicleId, selectedDate]);
 
+  // COMMENTED OUT API CALLS - Using static values
+  // Static vehicle and date
+  const staticVehicle = { id: '6361819', name: 'Rego 6361819 - MEAQ026', rego: '6361819' };
+  const staticDate = '2025-10-21';
+  
+  // Initialize with static values
+  useEffect(() => {
+    if (!selectedVehicleId) {
+      setSelectedVehicleId(staticVehicle.id);
+    }
+    if (!selectedDate) {
+      setSelectedDate(staticDate);
+    }
+  }, []);
+  
+  /*
   // Load vehicles from API with local fallback
   useEffect(() => {
     let aborted = false;
@@ -775,47 +792,17 @@ const FilterControls: React.FC = () => {
     loadDates();
     return () => { aborted = true; };
   }, [selectedVehicleId]);
+  */
 
-  // Toggle second view mode
-  const handleToggleSecondView = () => {
-    // Check if vehicle and date are selected
-    if (!selectedVehicleId || !selectedDate) {
-      console.warn('⚠️ Cannot toggle second view: vehicle or date not selected');
-      alert('Please select a vehicle and date first');
-      return;
-    }
-    
-    const newMode = !isSecondViewMode;
-    setIsSecondViewMode(newMode);
-    console.log('🔄 Toggling second view mode:', newMode ? 'enabled' : 'disabled');
-    
-    if (newMode) {
-      // Enable second view mode - dispatch event to load per-second data for entire day
-      window.dispatchEvent(new CustomEvent('second-view:toggle', {
-        detail: { enabled: true }
-      }));
-    } else {
-      // Disable second view mode - switch back to minute view
-      window.dispatchEvent(new CustomEvent('second-view:toggle', {
-        detail: { enabled: false }
-      }));
-    }
+  // Handle screen mode change (Maintenance/Drilling)
+  const handleScreenModeChange = (mode: 'Maintenance' | 'Drilling') => {
+    setScreenMode(mode);
+    console.log('🔄 Screen mode changed to:', mode);
+    // Dispatch event to notify VehicleDashboard
+    window.dispatchEvent(new CustomEvent('screen-mode:changed', {
+      detail: { mode }
+    }));
   };
-  
-  // Listen for external changes to second view mode (e.g., from VehicleDashboard)
-  useEffect(() => {
-    const handleSecondViewChange = (e: any) => {
-      const enabled = e?.detail?.enabled ?? false;
-      if (enabled !== isSecondViewMode) {
-        setIsSecondViewMode(enabled);
-      }
-    };
-    
-    window.addEventListener('second-view:changed', handleSecondViewChange as any);
-    return () => {
-      window.removeEventListener('second-view:changed', handleSecondViewChange as any);
-    };
-  }, [isSecondViewMode]);
   
   // Dispatch event when vehicle or date changes to trigger chart reload
   useEffect(() => {
@@ -883,23 +870,28 @@ const FilterControls: React.FC = () => {
     <div className={styles.filterControls}>
       <div className={styles.container}>
         <div className={styles.leftControls}>
+          <McCullochsLogo />
           <h1 className={styles.title}>Charts</h1>
           
           <select 
             className={styles.select}
-            value={selectedVehicleId}
+            value={selectedVehicleId || staticVehicle.id}
             onChange={(e) => {
               setSelectedVehicleId(e.target.value);
-              // Clear date when vehicle changes so it can auto-select the most recent date
-              setSelectedDate('');
             }}
+            disabled
           >
-            <option value="">Select Vehicle</option>
-            {vehicles.map(v => (
-              <option key={v.id} value={v.id}>{v.name}</option>
-            ))}
+            <option value={staticVehicle.id}>{staticVehicle.name}</option>
           </select>
           
+          <input
+            type="text"
+            className={styles.select}
+            value={formatDateForDisplay(selectedDate || staticDate)}
+            readOnly
+            disabled
+          />
+          {/* COMMENTED OUT - Using static date
           <div className={styles.datePickerWrapper} ref={calendarRef}>
             <button
               type="button"
@@ -927,14 +919,16 @@ const FilterControls: React.FC = () => {
               </div>
             )}
           </div>
+          */}
           
-          <button
-            className={`${styles.filterButton} ${isSecondViewMode ? styles.activeButton : ''}`}
-            onClick={handleToggleSecondView}
-            type="button"
+          <select 
+            className={styles.select}
+            value={screenMode}
+            onChange={(e) => handleScreenModeChange(e.target.value as 'Maintenance' | 'Drilling')}
           >
-            {isSecondViewMode ? 'View In Minutes' : 'View In Seconds'}
-          </button>
+            <option value="Maintenance">Maintenance</option>
+            <option value="Drilling">Drilling</option>
+          </select>
           
           <button className={styles.filterButton} onClick={() => window.dispatchEvent(new CustomEvent('filters:open'))}>Additional Filters</button>
         </div>

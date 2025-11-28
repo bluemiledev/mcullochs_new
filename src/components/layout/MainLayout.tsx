@@ -1,7 +1,6 @@
 import React from 'react';
 import { Routes, Route } from 'react-router-dom';
 import { TimeProvider } from '../../context/TimeContext';
-import MapComponent from '../MapComponent';
 import FilterControls from '../FilterControls';
 import VehicleDashboard from '../../pages/VehicleDashboard';
 import TableReport from '../../pages/TableReport';
@@ -11,7 +10,6 @@ const DashboardContent: React.FC = () => (
   <div className={styles.layout}>
     <FilterControls />
     <div className={styles.main}>
-      <MapComponent />
       <div className={styles.content}>
         <VehicleDashboard />
       </div>

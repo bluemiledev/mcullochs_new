@@ -1,0 +1,95 @@
+.tableContainer {
+  width: 100%;
+  margin: 40px 0;
+  padding: 20px;
+  background-color: #ffffff;
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.tableTitle {
+  font-size: 18px;
+  font-weight: 600;
+  color: #1f2937;
+  margin: 0 0 20px 0;
+  text-align: center;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.operationsTable {
+  width: 100%;
+  border-collapse: collapse;
+  border: 1px solid #e5e7eb;
+}
+
+.operationsTable thead {
+  background-color: #f3f4f6;
+}
+
+.operationsTable th {
+  padding: 12px 16px;
+  text-align: left;
+  font-size: 12px;
+  font-weight: 600;
+  color: #374151;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border: 1px solid #e5e7eb;
+}
+
+.outputNameHeader {
+  width: 40%;
+}
+
+.valueRangeHeader {
+  width: 10%;
+}
+
+.operationsTable tbody tr {
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.operationsTable tbody tr:hover {
+  background-color: #f9fafb;
+}
+
+.operationsTable td {
+  padding: 12px 16px;
+  font-size: 13px;
+  color: #1f2937;
+  border: 1px solid #e5e7eb;
+}
+
+.outputName {
+  font-weight: 500;
+  color: #374151;
+}
+
+.valueRange {
+  font-weight: 600;
+  color: #059669;
+  text-align: center;
+}
+
+@media (max-width: 768px) {
+  .tableContainer {
+    padding: 16px;
+    margin: 20px 0;
+  }
+
+  .tableTitle {
+    font-size: 16px;
+  }
+
+  .operationsTable {
+    font-size: 11px;
+  }
+
+  .operationsTable th,
+  .operationsTable td {
+    padding: 8px 12px;
+    font-size: 11px;
+  }
+}
+

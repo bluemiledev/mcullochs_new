@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { DayPicker } from 'react-day-picker';
-import 'react-day-picker/dist/style.css';
+import React, { useState } from 'react';
+// COMMENTED OUT - No longer using calendar picker
+// import { DayPicker } from 'react-day-picker';
+// import 'react-day-picker/dist/style.css';
 import styles from './AssetSelectionModal.module.css';
 import { formatDateForDisplay, formatDateForAPI } from '../utils';
 
@@ -11,107 +12,34 @@ interface Vehicle {
 }
 
 interface AssetSelectionModalProps {
-  onShowGraph: (vehicleId: number, date: string) => void;
+  onShowGraph: (vehicleId: number, date: string, shift: string, reportType: 'Maintenance' | 'Drilling') => void;
 }
 
 const AssetSelectionModal: React.FC<AssetSelectionModalProps> = ({ onShowGraph }) => {
+  // Static values - no API calls
+  const staticVehicle = { id: 6361819, name: 'Rego 6361819 - MEAQ026', rego: '6361819' };
+  const staticShift = '6 AM to 6 PM';
+  
+  const [selectedShift, setSelectedShift] = useState<string>(staticShift);
+  const [selectedReportType, setSelectedReportType] = useState<'Maintenance' | 'Drilling'>('Maintenance');
+  const [error, setError] = useState<string>('');
+  
+  // COMMENTED OUT API CALLS - Using static values
+  /*
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [dates, setDates] = useState<string[]>([]);
-  const [selectedVehicleId, setSelectedVehicleId] = useState<number | null>(null);
-  const [selectedDate, setSelectedDate] = useState<string>('');
   const [loadingVehicles, setLoadingVehicles] = useState<boolean>(true);
   const [loadingDates, setLoadingDates] = useState<boolean>(false);
-  const [error, setError] = useState<string>('');
   const [showCalendar, setShowCalendar] = useState<boolean>(false);
   const calendarRef = useRef<HTMLDivElement>(null);
+  */
 
+  // COMMENTED OUT API CALLS - Using static values
+  /*
   // Fetch vehicles on mount
   useEffect(() => {
     const fetchVehicles = async () => {
-      try {
-        setLoadingVehicles(true);
-        setError(''); // Clear previous errors
-        
-        // Vehicles endpoint (use reet_python API via proxy)
-        const apiUrl = '/reet_python/get_vehicles.php';
-        console.log('🔗 Fetching vehicles from:', apiUrl);
-        
-        const response = await fetch(apiUrl, {
-          headers: { 
-            'Accept': 'application/json',
-            'Cache-Control': 'no-cache',
-            'Pragma': 'no-cache'
-          },
-          cache: 'no-store',
-          mode: 'cors'
-        });
-        
-        if (!response.ok) {
-          const errorText = await response.text().catch(() => 'Unable to read error response');
-          console.error('❌ API Error Response:', errorText.substring(0, 500));
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-        
-        // Get response as text first to check if it's actually JSON
-        const text = await response.text();
-        const contentType = response.headers.get('content-type');
-        
-        // Check if response is actually JSON (even if Content-Type is wrong)
-        let json: any;
-        try {
-          // Try to parse as JSON
-          json = JSON.parse(text);
-          console.log('✅ Successfully parsed JSON response (Content-Type was:', contentType, ')');
-        } catch (parseError) {
-          // If parsing fails, check if it's HTML
-          if (text.includes('<!doctype') || text.includes('<html')) {
-            console.error('❌ Received HTML page instead of JSON. Content-Type:', contentType);
-            console.error('❌ Response URL:', response.url);
-            console.error('❌ Response status:', response.status);
-            console.error('❌ Response body (first 1000 chars):', text.substring(0, 1000));
-            console.error('❌ This usually means:');
-            console.error('   1. The proxy is not working (check terminal for proxy logs)');
-            console.error('   2. The API endpoint does not exist');
-            console.error('   3. The server returned an error page');
-            throw new Error(`API returned HTML page instead of JSON. Content-Type: ${contentType}. Check console for details.`);
-          } else {
-            // Not HTML, but also not valid JSON
-            console.error('❌ Response is not valid JSON. Content-Type:', contentType);
-            console.error('❌ Response body (first 1000 chars):', text.substring(0, 1000));
-            throw new Error(`API returned invalid JSON. Content-Type: ${contentType}. Check console for details.`);
-          }
-        }
-        console.log('✅ Vehicles API response:', json);
-        
-        // Map reet_python response: [{ devices_serial_no: "6363299", name: "Vehicle Name" }, ...]
-        const vehiclesData: Vehicle[] = (Array.isArray(json) ? json : [])
-          .map((v: any) => {
-            const serial = String(v?.devices_serial_no || '');
-            const name = String(v?.name || serial); // Use name field from API, fallback to serial
-            return { id: Number(serial), name, rego: serial };
-          })
-          .filter((v: Vehicle) => v.id > 0);
-        
-        console.log('📋 Processed vehicles:', vehiclesData);
-        
-        if (vehiclesData.length === 0) {
-          throw new Error('No vehicles found in API response');
-        }
-        
-        setVehicles(vehiclesData);
-        // Don't auto-select vehicle - user must select manually
-      } catch (err: any) {
-        const errorMsg = err.message || 'Failed to load vehicles. Please check the API endpoint.';
-        setError(errorMsg);
-        console.error('❌ Error fetching vehicles:', err);
-        console.error('Error details:', {
-          message: err.message,
-          stack: err.stack
-        });
-        setVehicles([]);
-      } finally {
-        setLoadingVehicles(false);
-      }
+      // ... API code commented out
     };
     fetchVehicles();
   }, []);
@@ -120,88 +48,7 @@ const AssetSelectionModal: React.FC<AssetSelectionModalProps> = ({ onShowGraph }
   useEffect(() => {
     if (selectedVehicleId) {
       const fetchDates = async () => {
-        try {
-          setLoadingDates(true);
-          setSelectedDate(''); // Reset date when vehicle changes
-          setError(''); // Clear previous errors
-          
-          // Use the reet_python endpoint with devices_serial_no parameter (via proxy)
-          const apiUrl = `/reet_python/get_vehicle_dates.php?devices_serial_no=${selectedVehicleId}`;
-          console.log('🔗 Fetching dates from:', apiUrl);
-          
-          const response = await fetch(apiUrl, {
-            headers: { 'Accept': 'application/json' },
-            cache: 'no-store',
-            mode: 'cors'
-          });
-          
-          if (!response.ok) {
-            const errorText = await response.text().catch(() => 'Unable to read error response');
-            console.error('❌ Dates API Error Response:', errorText.substring(0, 500));
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-          }
-          
-          // Get response as text first to check if it's actually JSON
-          const text = await response.text();
-          const contentType = response.headers.get('content-type');
-          
-          // Check if response is actually JSON (even if Content-Type is wrong)
-          let json: any;
-          try {
-            // Try to parse as JSON
-            json = JSON.parse(text);
-            console.log('✅ Successfully parsed dates JSON response (Content-Type was:', contentType, ')');
-          } catch (parseError) {
-            // If parsing fails, check if it's HTML
-            if (text.includes('<!doctype') || text.includes('<html')) {
-              console.error('❌ Dates API Response is HTML. Content-Type:', contentType);
-              console.error('❌ Response body (first 1000 chars):', text.substring(0, 1000));
-              throw new Error(`API returned HTML page instead of JSON. Content-Type: ${contentType}. Check console for details.`);
-            } else {
-              // Not HTML, but also not valid JSON
-              console.error('❌ Dates API Response is not valid JSON. Content-Type:', contentType);
-              console.error('❌ Response body (first 1000 chars):', text.substring(0, 1000));
-              throw new Error(`API returned invalid JSON. Content-Type: ${contentType}. Check console for details.`);
-            }
-          }
-          console.log('✅ Dates API response:', json);
-          
-          // Map reet_python response: [{ date: "YYYY-MM-DD" }, ...]
-          let datesData: string[] = (Array.isArray(json) ? json : [])
-            .map((o: any) => String(o?.date || ''))
-            .filter((d: string) => d.length > 0);
-          
-          // Ensure dates are strings and sort them (newest first)
-          // Keep dates in YYYY-MM-DD format for internal use, but display in DD-MM-YYYY
-          datesData = datesData
-            .map((d: any) => String(d))
-            .filter((d: string) => d.length > 0)
-            .sort((a: string, b: string) => b.localeCompare(a)); // Sort descending (newest first)
-          
-          console.log('📅 Processed dates:', datesData);
-          
-          // Don't show error if no dates found, just set empty array
-          setDates(datesData);
-          setError(''); // Clear any previous errors on successful fetch
-        } catch (err: any) {
-          // Only show error for actual API failures, not for empty responses
-          const errorMsg = err.message || 'Failed to load dates. Please check the API endpoint.';
-          // Don't show error for "No dates found" - just log it
-          if (!errorMsg.includes('No dates found')) {
-            setError(errorMsg);
-          } else {
-            setError('');
-          }
-          console.error('❌ Error fetching dates:', err);
-          console.error('Error details:', {
-            message: err.message,
-            stack: err.stack,
-            vehicleId: selectedVehicleId
-          });
-          setDates([]);
-        } finally {
-          setLoadingDates(false);
-        }
+        // ... API code commented out
       };
       fetchDates();
     } else {
@@ -209,24 +56,34 @@ const AssetSelectionModal: React.FC<AssetSelectionModalProps> = ({ onShowGraph }
       setSelectedDate('');
     }
   }, [selectedVehicleId]);
+  */
 
   const handleShowGraph = () => {
-    if (selectedVehicleId && selectedDate) {
-      // Convert display format (DD-MM-YYYY) back to API format (YYYY-MM-DD) if needed
-      const apiDate = formatDateForAPI(selectedDate);
-      // Dispatch event so FilterControls can initialize with selected values
-      window.dispatchEvent(new CustomEvent('asset:selected', {
-        detail: {
-          device_id: selectedVehicleId,
-          date: apiDate
-        }
-      }));
-      onShowGraph(selectedVehicleId, apiDate);
-    }
+    // Use static values
+    const vehicleId = staticVehicle.id;
+    const dateToUse = '2025-10-21'; // Static date
+    // Convert display format (DD-MM-YYYY) back to API format (YYYY-MM-DD) if needed
+    const apiDate = formatDateForAPI(dateToUse);
+    // Dispatch event so FilterControls can initialize with selected values
+    window.dispatchEvent(new CustomEvent('asset:selected', {
+      detail: {
+        device_id: vehicleId,
+        date: apiDate,
+        shift: selectedShift,
+        reportType: selectedReportType
+      }
+    }));
+    // Dispatch screen mode change event
+    window.dispatchEvent(new CustomEvent('screen-mode:changed', {
+      detail: { mode: selectedReportType }
+    }));
+    onShowGraph(vehicleId, apiDate, selectedShift, selectedReportType);
   };
 
-  const isFormValid = selectedVehicleId !== null && selectedDate !== '';
+  const isFormValid = true; // Always valid since we use static values
 
+  // COMMENTED OUT - Using static date, no calendar needed
+  /*
   // Close calendar when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -275,6 +132,7 @@ const AssetSelectionModal: React.FC<AssetSelectionModalProps> = ({ onShowGraph }
     const [year, month, day] = selectedDate.split('-').map(Number);
     return new Date(year, month - 1, day);
   }, [selectedDate]);
+  */
 
   return (
     <div className={styles.modalOverlay}>
@@ -290,62 +148,53 @@ const AssetSelectionModal: React.FC<AssetSelectionModalProps> = ({ onShowGraph }
 
         <div className={styles.formGroup}>
           <label className={styles.label}>Select Asset</label>
-          <select
+          <input
+            type="text"
             className={styles.select}
-            value={selectedVehicleId || ''}
-            onChange={(e) => {
-              setSelectedVehicleId(Number(e.target.value));
-              setError(''); // Clear error when vehicle changes
-            }}
-            disabled={loadingVehicles}
-          >
-            <option value="">Select Asset</option>
-            {vehicles.map((vehicle) => (
-              <option key={vehicle.id} value={vehicle.id}>
-                {vehicle.name}
-              </option>
-            ))}
-          </select>
+            value={staticVehicle.name}
+            readOnly
+            disabled
+          />
         </div>
 
         <div className={styles.formGroup}>
           <label className={styles.label}>Select Date</label>
-          <div className={styles.datePickerWrapper} ref={calendarRef}>
-            <button
-              type="button"
-              className={styles.datePickerButton}
-              onClick={() => setShowCalendar(!showCalendar)}
-              disabled={loadingDates || !selectedVehicleId || dates.length === 0}
-            >
-              {selectedDate ? formatDateForDisplay(selectedDate) : 'Select Date'}
-            </button>
-            {showCalendar && selectedVehicleId && dates.length > 0 && !loadingDates && (
-              <div className={styles.calendarDropdown}>
-                <DayPicker
-                  mode="single"
-                  selected={selectedDateObj}
-                  onSelect={handleDateSelect}
-                  disabled={isDateDisabled}
-                  modifiers={{
-                    available: availableDates
-                  }}
-                  modifiersClassNames={{
-                    available: styles.availableDate
-                  }}
-                  className={styles.calendar}
-                />
-              </div>
-            )}
-          </div>
-          {loadingDates && selectedVehicleId && (
-            <div className={styles.loadingText}>Loading dates...</div>
-          )}
+          <input
+            type="text"
+            className={styles.select}
+            value="21-10-2025"
+            readOnly
+            disabled
+          />
+        </div>
+
+        <div className={styles.formGroup}>
+          <label className={styles.label}>Shift</label>
+          <select
+            className={styles.select}
+            value={selectedShift}
+            onChange={(e) => setSelectedShift(e.target.value)}
+          >
+            <option value="6 AM to 6 PM">6 AM to 6 PM</option>
+          </select>
+        </div>
+
+        <div className={styles.formGroup}>
+          <label className={styles.label}>Report Type</label>
+          <select
+            className={styles.select}
+            value={selectedReportType}
+            onChange={(e) => setSelectedReportType(e.target.value as 'Maintenance' | 'Drilling')}
+          >
+            <option value="Maintenance">Maintenance</option>
+            <option value="Drilling">Drilling</option>
+          </select>
         </div>
 
         <button
           className={styles.showButton}
           onClick={handleShowGraph}
-          disabled={!isFormValid || loadingVehicles || loadingDates}
+          disabled={!isFormValid}
         >
           Show Graph
         </button>
