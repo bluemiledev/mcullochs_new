@@ -930,7 +930,23 @@ const FilterControls: React.FC = () => {
             <option value="Drilling">Drilling</option>
           </select>
           
-          <button className={styles.filterButton} onClick={() => window.dispatchEvent(new CustomEvent('filters:open'))}>Additional Filters</button>
+          <select 
+            className={styles.select}
+            defaultValue="6 AM to 6 PM"
+          >
+            <option value="6 AM to 6 PM">6 AM to 6 PM</option>
+            <option value="6 PM to 6 AM">6 PM to 6 AM</option>
+          </select>
+          
+          <button 
+            className={styles.filterButton} 
+            onClick={() => {
+              // DISABLED - Popup functionality disabled
+              // window.dispatchEvent(new CustomEvent('filters:open'));
+            }}
+          >
+            Additional Filters
+          </button>
         </div>
         
       

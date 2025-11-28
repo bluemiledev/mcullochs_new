@@ -104,9 +104,47 @@ const DrillingOperationsTable: React.FC<DrillingOperationsTableProps> = ({
     ? 'DRILLING - RIG OPERATIONS REPORTING OUTPUTS'
     : 'MAINTENANCE - REPORTING OUTPUTS';
 
+  const handleExportPDF = () => {
+    // TODO: Implement PDF export functionality
+    console.log('Exporting to PDF...', operationsWithValues);
+    // Placeholder for PDF export
+  };
+
+  const handleExportCSV = () => {
+    // Create CSV content
+    const headers = ['Output Name', 'Value Range'];
+    const rows = operationsWithValues.map(op => [op.outputName, op.valueRange]);
+    
+    const csvContent = [
+      headers.join(','),
+      ...rows.map(row => row.join(','))
+    ].join('\n');
+    
+    // Create blob and download
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `${tableTitle.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   return (
     <div className={styles.tableContainer}>
-      <h2 className={styles.tableTitle}>{tableTitle}</h2>
+      <div className={styles.tableHeader}>
+        <h2 className={styles.tableTitle}>{tableTitle}</h2>
+        <div className={styles.exportButtons}>
+          <button className={styles.exportButton} onClick={handleExportCSV}>
+            CSV
+          </button>
+          <button className={styles.exportButton} onClick={handleExportPDF}>
+            PDF
+          </button>
+        </div>
+      </div>
       <table className={styles.operationsTable}>
         <thead>
           <tr>

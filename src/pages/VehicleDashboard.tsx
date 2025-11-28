@@ -2426,7 +2426,6 @@ useEffect(() => {
     <div className={styles.dashboard}>
       <div className={styles.topPanel}>
         <div className={styles.headerBar}>
-          <div className={styles.headerTitle}>Smart Data Link</div>
           <div className={styles.headerStatus}>
             {/* <span className={styles.headerLabel}>Time:</span> */}
             {/* <span className={styles.headerValue}>

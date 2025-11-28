@@ -7,14 +7,48 @@
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
+.tableHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
 .tableTitle {
   font-size: 18px;
   font-weight: 600;
   color: #1f2937;
-  margin: 0 0 20px 0;
-  text-align: center;
+  margin: 0;
+  text-align: left;
   text-transform: uppercase;
   letter-spacing: 0.5px;
+}
+
+.exportButtons {
+  display: flex;
+  gap: 10px;
+}
+
+.exportButton {
+  padding: 8px 20px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #ffffff;
+  background-color: #3b82f6;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  transition: background-color 0.2s ease;
+}
+
+.exportButton:hover {
+  background-color: #2563eb;
+}
+
+.exportButton:active {
+  background-color: #1d4ed8;
 }
 
 .operationsTable {

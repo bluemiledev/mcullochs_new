@@ -176,6 +176,7 @@ const AssetSelectionModal: React.FC<AssetSelectionModalProps> = ({ onShowGraph }
             onChange={(e) => setSelectedShift(e.target.value)}
           >
             <option value="6 AM to 6 PM">6 AM to 6 PM</option>
+            <option value="6 PM to 6 AM">6 PM to 6 AM</option>
           </select>
         </div>
 

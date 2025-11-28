@@ -104,7 +104,7 @@
   font-size: 16px;
   font-weight: 600;
   color: #ffffff;
-  background: #fbbf24;
+  background: #dc2626;
   border: none;
   border-radius: 6px;
   cursor: pointer;
@@ -113,9 +113,9 @@
 }
 
 .showButton:hover:not(:disabled) {
-  background: #f59e0b;
+  background: #b91c1c;
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(251, 191, 36, 0.4);
+  box-shadow: 0 4px 12px rgba(220, 38, 38, 0.4);
 }
 
 .showButton:active:not(:disabled) {
