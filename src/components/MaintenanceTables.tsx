@@ -1,5 +1,5 @@
-import React from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import styles from './MaintenanceTables.module.css';
 
 interface MaintenanceTablesProps {
@@ -20,9 +20,35 @@ const MaintenanceTables: React.FC<MaintenanceTablesProps> = ({
   visibleRows = {}
 }) => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  
+  // Search state for each table
+  const [searchQuery1, setSearchQuery1] = useState<string>('');
+  const [searchQuery2, setSearchQuery2] = useState<string>('');
+  const [searchQuery3, setSearchQuery3] = useState<string>('');
+  
+  // Helper function to filter by search query
+  const matchesSearch = (outputName: string, searchQuery: string): boolean => {
+    if (!searchQuery.trim()) return true;
+    return outputName.toLowerCase().includes(searchQuery.toLowerCase());
+  };
 
   const handleViewClick = (outputName: string) => {
-    navigate(`/maintenance-detail?outputName=${encodeURIComponent(outputName)}`);
+    // Get vehicle and date from current URL to preserve them
+    const deviceId = searchParams.get('device_id') || searchParams.get('vehicle');
+    const date = searchParams.get('date');
+    
+    // Build navigation URL with outputName and preserved vehicle/date parameters
+    const params = new URLSearchParams();
+    params.set('outputName', outputName);
+    if (deviceId) {
+      params.set('device_id', deviceId);
+    }
+    if (date) {
+      params.set('date', date);
+    }
+    
+    navigate(`/maintenance-detail?${params.toString()}`);
   };
   // Format minutes to HH:MM:SS
   const formatMinutesToHours = (minutes: number): string => {
@@ -66,13 +92,19 @@ const MaintenanceTables: React.FC<MaintenanceTablesProps> = ({
   };
 
   return (
-    <div className={styles.maintenanceTablesContainer}>
+    <div id="maintenanceTablesContainer" className={styles.maintenanceTablesContainer}>
       {/* Section 1: MAINTENANCE - REPORTING OUTPUTS */}
       <div className={styles.tableSection}>
         <div className={styles.tableHeader}>
           <h3 className={styles.tableTitle}>MAINTENANCE - REPORTING OUTPUTS</h3>
           <div className={styles.tableActions}>
-            <input type="text" placeholder="Search..." className={styles.searchInput} />
+            <input 
+              type="text" 
+              placeholder="Search..." 
+              className={styles.searchInput}
+              value={searchQuery1}
+              onChange={(e) => setSearchQuery1(e.target.value)}
+            />
           </div>
         </div>
         <table className={styles.dataTable}>
@@ -85,6 +117,11 @@ const MaintenanceTables: React.FC<MaintenanceTablesProps> = ({
           <tbody>
             {Object.entries(reportingOutputs)
               .filter(([outputName]) => {
+                // Search filter
+                if (!matchesSearch(outputName, searchQuery1)) {
+                  return false;
+                }
+                // Visibility filter
                 // If no filters are applied (empty object), show all rows
                 if (Object.keys(visibleRows).length === 0) {
                   return true;
@@ -109,7 +146,13 @@ const MaintenanceTables: React.FC<MaintenanceTablesProps> = ({
         <div className={styles.tableHeader}>
           <h3 className={styles.tableTitle}>MAINTENANCE - FAULT REPORTING OUTPUTS (ANALOG)</h3>
           <div className={styles.tableActions}>
-            <input type="text" placeholder="Search..." className={styles.searchInput} />
+            <input 
+              type="text" 
+              placeholder="Search..." 
+              className={styles.searchInput}
+              value={searchQuery2}
+              onChange={(e) => setSearchQuery2(e.target.value)}
+            />
           </div>
         </div>
         <table className={styles.dataTable}>
@@ -123,6 +166,11 @@ const MaintenanceTables: React.FC<MaintenanceTablesProps> = ({
           <tbody>
             {Object.entries(faultReportingAnalog)
               .filter(([outputName]) => {
+                // Search filter
+                if (!matchesSearch(outputName, searchQuery2)) {
+                  return false;
+                }
+                // Visibility filter
                 // If no filters are applied (empty object), show all rows
                 if (Object.keys(visibleRows).length === 0) {
                   return true;
@@ -158,7 +206,13 @@ const MaintenanceTables: React.FC<MaintenanceTablesProps> = ({
         <div className={styles.tableHeader}>
           <h3 className={styles.tableTitle}>MAINTENANCE - FAULT REPORTING OUTPUTS (DIGITAL)</h3>
           <div className={styles.tableActions}>
-            <input type="text" placeholder="Search..." className={styles.searchInput} />
+            <input 
+              type="text" 
+              placeholder="Search..." 
+              className={styles.searchInput}
+              value={searchQuery3}
+              onChange={(e) => setSearchQuery3(e.target.value)}
+            />
           </div>
         </div>
         <table className={styles.dataTable}>
@@ -172,6 +226,11 @@ const MaintenanceTables: React.FC<MaintenanceTablesProps> = ({
           <tbody>
             {Object.entries(faultReportingDigital)
               .filter(([outputName]) => {
+                // Search filter
+                if (!matchesSearch(outputName, searchQuery3)) {
+                  return false;
+                }
+                // Visibility filter
                 // If no filters are applied (empty object), show all rows
                 if (Object.keys(visibleRows).length === 0) {
                   return true;

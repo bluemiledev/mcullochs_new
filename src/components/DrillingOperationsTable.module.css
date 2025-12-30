@@ -8,7 +8,28 @@
 }
 
 .tableHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
   margin-bottom: 8px;
+}
+
+.tableActions {
+  display: flex;
+  gap: 8px;
+}
+
+.searchInput {
+  padding: 4px 8px;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  font-size: 10px;
+  width: 150px;
+}
+
+.searchInput:focus {
+  outline: none;
+  border-color: #3b82f6;
 }
 
 .tableTitle {

@@ -1,69 +1,24 @@
 .logoContainer {
   display: flex;
   align-items: center;
-  gap: 12px;
   margin-right: 16px;
 }
 
-.logoEmblem {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
-.logoText {
-  display: flex;
-  flex-direction: column;
-  line-height: 1.2;
-}
-
-.companyName {
-  font-size: 18px;
-  font-weight: 700;
-  color: #000000;
-  letter-spacing: 0.5px;
-  text-transform: uppercase;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', sans-serif;
-}
-
-.tagline {
-  font-size: 10px;
-  font-weight: 500;
-  color: #6b7280;
-  letter-spacing: 0.3px;
-  text-transform: uppercase;
-  margin-top: 2px;
-}
-
-.established {
-  font-size: 9px;
-  font-weight: 400;
-  color: #6b7280;
-  margin-top: 1px;
+.logoImage {
+  width: 150px;
+  height: 55px;
+  object-fit: contain;
+  display: block;
 }
 
 @media (max-width: 768px) {
   .logoContainer {
     margin-right: 8px;
-    gap: 8px;
   }
 
-  .logoEmblem svg {
+  .logoImage {
     width: 40px;
     height: 40px;
-  }
-
-  .companyName {
-    font-size: 14px;
-  }
-
-  .tagline {
-    font-size: 9px;
-  }
-
-  .established {
-    font-size: 8px;
   }
 }
 

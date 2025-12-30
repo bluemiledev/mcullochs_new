@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { flushSync } from 'react-dom';
 import { format, parseISO } from 'date-fns';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import TimeScrubber from '../components/TimeScrubber';
 import DigitalSignalTimeline from '../components/DigitalSignalTimeline';
 import AnalogChart from '../components/AnalogChart';
@@ -43,6 +44,14 @@ interface DigitalStatusChart {
 }
 
 const VehicleDashboard: React.FC = () => {
+  const [searchParams, setSearchParams] = useSearchParams();
+  
+  // Check URL params immediately to initialize state
+  const initialVehicleParam = searchParams.get('device_id') || searchParams.get('vehicle');
+  const initialDateParam = searchParams.get('date');
+  const initialVehicleId = initialVehicleParam ? Number(initialVehicleParam) : null;
+  const hasUrlParams = initialVehicleId && initialDateParam;
+  
   const [vehicleMetrics, setVehicleMetrics] = useState<VehicleMetric[]>([]);
   const [digitalStatusChart, setDigitalStatusChart] = useState<DigitalStatusChart | null>(null);
   const { selectedTime, setSelectedTime } = useTimeContext();
@@ -50,10 +59,10 @@ const VehicleDashboard: React.FC = () => {
   const [selectionEnd, setSelectionEnd] = useState<Date | null>(null);
   const [crosshairActive, setCrosshairActive] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(false);
-  // Enable asset modal with static values - start with modal showing
-  const [showAssetModal, setShowAssetModal] = useState<boolean>(true);
-  const [selectedVehicleId, setSelectedVehicleId] = useState<number | null>(null);
-  const [selectedDate, setSelectedDate] = useState<string>('');
+  // Enable asset modal - hide it if URL params are present
+  const [showAssetModal, setShowAssetModal] = useState<boolean>(!hasUrlParams);
+  const [selectedVehicleId, setSelectedVehicleId] = useState<number | null>(initialVehicleId);
+  const [selectedDate, setSelectedDate] = useState<string>(initialDateParam || '');
   const [visibleChartsCount, setVisibleChartsCount] = useState<number>(5); // Start with 5 charts, progressively render more
   const [processingProgress, setProcessingProgress] = useState<number>(0);
   const [vehicles, setVehicles] = useState<Array<{ id: number; name: string; rego: string }>>([]);
@@ -93,11 +102,38 @@ const VehicleDashboard: React.FC = () => {
   const vehicleMetricsRef = useRef<VehicleMetric[]>([]);
   const digitalStatusChartRef = useRef<DigitalStatusChart | null>(null);
   
+  // Update state when URL params change (e.g., when navigating back)
+  useEffect(() => {
+    const vehicleParam = searchParams.get('device_id') || searchParams.get('vehicle');
+    const dateParam = searchParams.get('date');
+    
+    if (vehicleParam && dateParam) {
+      const vehicleId = Number(vehicleParam);
+      if (vehicleId && dateParam) {
+        setSelectedVehicleId(vehicleId);
+        setSelectedDate(dateParam);
+        setShowAssetModal(false);
+        // Dispatch event so FilterControls can also initialize
+        window.dispatchEvent(new CustomEvent('filters:apply', {
+          detail: {
+            device_id: vehicleId,
+            date: dateParam
+          }
+        }));
+      }
+    } else if (!vehicleParam && !dateParam) {
+      // If no params, show modal (but only if we don't already have values set)
+      if (!selectedVehicleId || !selectedDate) {
+        setShowAssetModal(true);
+      }
+    }
+  }, [searchParams, selectedVehicleId, selectedDate]);
+
   // Keep refs in sync with state
   useEffect(() => {
     vehicleMetricsRef.current = vehicleMetrics;
   }, [vehicleMetrics]);
-  
+
   useEffect(() => {
     digitalStatusChartRef.current = digitalStatusChart;
   }, [digitalStatusChart]);
@@ -322,7 +358,7 @@ useEffect(() => {
     window.dispatchEvent(new CustomEvent('filters:apply', { 
       detail: { device_id: vehicleId, date } 
     }));
-  }, []);
+  }, [searchParams, setSearchParams]);
 
   
 

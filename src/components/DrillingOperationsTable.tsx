@@ -1,4 +1,4 @@
-import React, { useMemo, useEffect } from 'react';
+import React, { useMemo, useEffect, useState } from 'react';
 import styles from './DrillingOperationsTable.module.css';
 
 interface DrillingOperation {
@@ -22,12 +22,21 @@ const DrillingOperationsTable: React.FC<DrillingOperationsTableProps> = ({
   selectionEnd,
   visibleRows = {}
 }) => {
+  // Search state
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  
   // Debug: Log visibleRows when it changes
   useEffect(() => {
     if (mode === 'Drilling') {
       console.log('🔍 DrillingOperationsTable visibleRows:', visibleRows, 'Keys:', Object.keys(visibleRows));
     }
   }, [visibleRows, mode]);
+  
+  // Helper function to filter by search query
+  const matchesSearch = (outputName: string, query: string): boolean => {
+    if (!query.trim()) return true;
+    return outputName.toLowerCase().includes(query.toLowerCase());
+  };
 
   // Static output names - same for both modes
   const maintenanceOperations: Array<{ outputName: string; maxValue: number }> = [
@@ -112,8 +121,8 @@ const DrillingOperationsTable: React.FC<DrillingOperationsTableProps> = ({
       // Format output based on mode
       let outputValue: string;
       if (mode === 'Drilling') {
-        // For drilling, format as HH:MM:SS
-        outputValue = formatMinutesToHours(currentValueMinutes);
+        // For drilling, format as HH:MM:SS (HOURS)
+        outputValue = `${formatMinutesToHours(currentValueMinutes)} (HOURS)`;
       } else {
         // For maintenance, show as single value
         outputValue = String(Math.round(currentValueMinutes));
@@ -132,9 +141,18 @@ const DrillingOperationsTable: React.FC<DrillingOperationsTableProps> = ({
     : 'MAINTENANCE - REPORTING OUTPUTS';
 
   return (
-    <div className={styles.tableContainer}>
+    <div id="drillingOperationsTable" className={styles.tableContainer}>
       <div className={styles.tableHeader}>
         <h2 className={styles.tableTitle}>{tableTitle}</h2>
+        <div className={styles.tableActions}>
+          <input 
+            type="text" 
+            placeholder="Search..." 
+            className={styles.searchInput}
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
+        </div>
       </div>
       <table className={styles.operationsTable}>
         <thead>
@@ -146,6 +164,12 @@ const DrillingOperationsTable: React.FC<DrillingOperationsTableProps> = ({
         <tbody>
           {operationsWithValues
             .filter((operation) => {
+              // Search filter
+              if (!matchesSearch(operation.outputName, searchQuery)) {
+                return false;
+              }
+              
+              // Visibility filter (for drilling mode)
               if (mode === 'Drilling' && 'code' in operation) {
                 const code = (operation as any).code;
                 // If no filters are applied (empty object), show all rows

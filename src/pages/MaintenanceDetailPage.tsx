@@ -21,15 +21,18 @@ const MaintenanceDetailPage: React.FC = () => {
   const outputName = searchParams.get('outputName') || '';
   const [instances, setInstances] = useState<Instance[]>([]);
   
+  // Active filter state for summary boxes
+  const [activeFilter, setActiveFilter] = useState<'all' | 'meets' | 'falls'>('meets');
+  
   // Time selection state
   const [selectedTime, setSelectedTime] = useState<Date | null>(null);
   const [selectionStart, setSelectionStart] = useState<Date | null>(null);
   const [selectionEnd, setSelectionEnd] = useState<Date | null>(null);
   
-  // Refs for throttling
+  // Use refs to track throttling for smooth scrubber performance
   const rafRef = useRef<number | null>(null);
   const lastUpdateRef = useRef<number>(0);
-  const THROTTLE_MS = 16;
+  const THROTTLE_MS = 16; // ~60fps
 
   // Initialize default time range (6 AM to 6 PM for today)
   useEffect(() => {
@@ -53,71 +56,132 @@ const MaintenanceDetailPage: React.FC = () => {
     }
   }, [outputName]);
 
-  // Prepare scrubber data from instances
-  const scrubberData = useMemo(() => {
-    if (instances.length === 0 || !selectionStart || !selectionEnd) {
-      // Generate default data for 6 AM to 6 PM
-      const start = selectionStart?.getTime() || new Date().setHours(6, 0, 0, 0);
-      const end = selectionEnd?.getTime() || new Date().setHours(18, 0, 0, 0);
-      const data: Array<{ time: number }> = [];
-      const step = 60 * 1000; // 1 minute resolution
-      for (let t = start; t <= end; t += step) {
-        data.push({ time: t });
+  // Listen to screen mode changes - navigate back to main page if mode changes
+  useEffect(() => {
+    const handleScreenModeChange = (e: any) => {
+      const mode = e?.detail?.mode;
+      if (mode === 'Drilling' || mode === 'Maintenance') {
+        // Get current URL params to preserve vehicle/date
+        const deviceId = searchParams.get('device_id') || searchParams.get('vehicle');
+        const date = searchParams.get('date');
+        
+        // Navigate back to main page with preserved params
+        const params = new URLSearchParams();
+        if (deviceId) {
+          params.set('device_id', deviceId);
+        }
+        if (date) {
+          params.set('date', date);
+        }
+        
+        const backUrl = params.toString() ? `/?${params.toString()}` : '/';
+        navigate(backUrl);
       }
-      return data;
-    }
+    };
+    
+    window.addEventListener('screen-mode:changed', handleScreenModeChange as any);
+    return () => {
+      window.removeEventListener('screen-mode:changed', handleScreenModeChange as any);
+    };
+  }, [navigate, searchParams]);
 
-    // Convert instance times to timestamps
-    const start = selectionStart.getTime();
-    const end = selectionEnd.getTime();
+  // Prepare scrubber data - per-second in second view mode, per-minute otherwise
+  const scrubberData = useMemo(() => {
+    // Always use minute-based timestamps (second view mode removed)
+    
+    // Default: per-minute resolution
+    // Prefer explicit selection range when available
+    const candidateStarts: number[] = [];
+    const candidateEnds: number[] = [];
+
+    if (selectionStart) candidateStarts.push(selectionStart.getTime());
+    if (selectionEnd) candidateEnds.push(selectionEnd.getTime());
+
+    if (candidateStarts.length === 0 || candidateEnds.length === 0) return [];
+
+    const startTs = Math.min(...candidateStarts);
+    const endTs = Math.max(...candidateEnds);
+    if (!Number.isFinite(startTs) || !Number.isFinite(endTs) || startTs >= endTs) return [];
+
     const data: Array<{ time: number }> = [];
     const step = 60 * 1000; // 1 minute resolution
-    for (let t = start; t <= end; t += step) {
+    for (let t = startTs; t <= endTs; t += step) {
       data.push({ time: t });
     }
+    if (data.length === 0 || data[data.length - 1].time !== endTs) data.push({ time: endTs });
     return data;
-  }, [instances, selectionStart, selectionEnd]);
+  }, [selectionStart, selectionEnd]);
 
-  // Handle time change from scrubber
+  // Handle time change from scrubber with throttling for smooth performance
   const handleTimeChange = useCallback((timestamp: number) => {
     const now = Date.now();
     
+    // Cancel any pending animation frame
     if (rafRef.current !== null) {
       cancelAnimationFrame(rafRef.current);
     }
     
-    if (now - lastUpdateRef.current >= THROTTLE_MS) {
+    // In second view mode, use smaller throttle to allow second-by-second updates
+    // In minute view mode, use normal throttle
+    const throttleMs = THROTTLE_MS; // Always use standard throttle (minute view)
+    
+    // Throttle updates to prevent excessive re-renders
+    if (now - lastUpdateRef.current >= throttleMs) {
       setSelectedTime(new Date(timestamp));
       lastUpdateRef.current = now;
       rafRef.current = null;
     } else {
+      // Schedule deferred update
       rafRef.current = requestAnimationFrame(() => {
         setSelectedTime(new Date(timestamp));
         lastUpdateRef.current = Date.now();
         rafRef.current = null;
       });
     }
-  }, []);
+  }, []); // Always use minute view settings
 
   // Handle selection range change from scrubber
   const handleSelectionChange = useCallback((startTimestamp: number, endTimestamp: number) => {
     const start = new Date(startTimestamp);
     const end = new Date(endTimestamp);
-    const minRangeMs = 60 * 60 * 1000; // 1 hour minimum
+    
+    // In second view mode: enforce MIN 10 minutes range
+    // In minute view mode: enforce MIN 1 hour range
+    const minRangeMs = 60 * 60 * 1000; // Always 1 hour (minute view)
     const rangeMs = endTimestamp - startTimestamp;
+    const newStart = start;
     let newEnd = end;
     if (rangeMs < minRangeMs) {
       newEnd = new Date(startTimestamp + minRangeMs);
     }
-    setSelectionStart(start);
+    setSelectionStart(newStart);
     setSelectionEnd(newEnd);
-    const centerTime = new Date((start.getTime() + newEnd.getTime()) / 2);
-    setSelectedTime(centerTime);
-  }, []);
+    
+    // Preserve the selected time when dragging range bars
+    // Only clamp it if it goes outside the new range
+    setSelectedTime(prev => {
+      if (!prev) {
+        // If no previous time, set to center
+        return new Date((newStart.getTime() + newEnd.getTime()) / 2);
+      }
+      const prevTime = prev.getTime();
+      const newStartTime = newStart.getTime();
+      const newEndTime = newEnd.getTime();
+      
+      // Only update if the previous time is outside the new range
+      if (prevTime < newStartTime) {
+        return newStart;
+      } else if (prevTime > newEndTime) {
+        return newEnd;
+      }
+      // Keep the exact same time if it's still within range
+      return prev;
+    });
+  }, []); // Always use minute view settings
 
   // Handle hover from scrubber
   const handleHover = useCallback((_timestamp: number | null) => {
-    // No-op: keep pointer fixed unless dragged
+    // Intentionally no-op: keep pointer/red-line fixed unless knob is dragged
   }, []);
 
   // Calculate statistics
@@ -130,19 +194,50 @@ const MaintenanceDetailPage: React.FC = () => {
     
     return { total, meetsCriteria, fallsCriteria };
   }, [instances]);
+  
+  // Filter instances based on active filter
+  const filteredInstances = useMemo(() => {
+    if (activeFilter === 'all') {
+      return instances;
+    } else if (activeFilter === 'meets') {
+      return instances.filter(inst => inst.value > 380);
+    } else {
+      return instances.filter(inst => inst.value <= 380);
+    }
+  }, [instances, activeFilter]);
 
-  // Pagination
-  const totalPages = Math.ceil(instances.length / ITEMS_PER_PAGE);
+  // Pagination - reset to page 1 when filter changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [activeFilter]);
+  
+  const totalPages = Math.ceil(filteredInstances.length / ITEMS_PER_PAGE);
   const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
   const endIndex = startIndex + ITEMS_PER_PAGE;
-  const paginatedInstances = instances.slice(startIndex, endIndex);
+  const paginatedInstances = filteredInstances.slice(startIndex, endIndex);
 
   const handlePageChange = (page: number) => {
     setCurrentPage(page);
   };
 
   const handleBack = () => {
-    navigate(-1); // Go back to previous page
+    // Get vehicle and date from current URL to preserve them when navigating back
+    const deviceId = searchParams.get('device_id') || searchParams.get('vehicle');
+    const date = searchParams.get('date');
+    
+    // Build the navigation URL with preserved parameters
+    const params = new URLSearchParams();
+    if (deviceId) {
+      params.set('device_id', deviceId);
+    }
+    if (date) {
+      params.set('date', date);
+    }
+    
+    // Navigate to maintenance page with preserved vehicle/date parameters
+    // This prevents the asset selection modal from showing
+    const backUrl = params.toString() ? `/?${params.toString()}` : '/';
+    navigate(backUrl);
   };
 
   if (!outputName) {
@@ -161,20 +256,17 @@ const MaintenanceDetailPage: React.FC = () => {
       <FilterControls />
       
       <div className={styles.content}>
-        {/* Time Scrubber */}
-        {scrubberData.length > 0 && selectionStart && selectionEnd && (
-          <div className={styles.scrubberContainer}>
-            <TimeScrubber
-              data={scrubberData}
-              selectedTime={selectedTime?.getTime() || null}
-              selectionStart={selectionStart.getTime()}
-              selectionEnd={selectionEnd.getTime()}
-              onTimeChange={handleTimeChange}
-              onSelectionChange={handleSelectionChange}
-              onHover={handleHover}
-              isSecondViewMode={false}
-            />
-          </div>
+        {scrubberData.length > 0 && (
+          <TimeScrubber
+            data={scrubberData}
+            selectedTime={selectedTime?.getTime() || null}
+            selectionStart={selectionStart?.getTime() || null}
+            selectionEnd={selectionEnd?.getTime() || null}
+            onTimeChange={handleTimeChange}
+            onSelectionChange={handleSelectionChange}
+            onHover={handleHover}
+            isSecondViewMode={false}
+          />
         )}
 
         {/* Header */}
@@ -187,18 +279,27 @@ const MaintenanceDetailPage: React.FC = () => {
 
         {/* Summary Boxes */}
         <div className={styles.summaryContainer}>
-          <div className={styles.summaryBox}>
+          <button 
+            className={`${styles.summaryBox} ${activeFilter === 'all' ? styles.summaryBoxActive : ''}`}
+            onClick={() => setActiveFilter('all')}
+          >
             <div className={styles.summaryLabel}>Total Record Count</div>
             <div className={styles.summaryValue}>{stats.total}</div>
-          </div>
-          <div className={`${styles.summaryBox} ${styles.summaryBoxHighlight}`}>
+          </button>
+          <button 
+            className={`${styles.summaryBox} ${activeFilter === 'meets' ? styles.summaryBoxActive : ''}`}
+            onClick={() => setActiveFilter('meets')}
+          >
             <div className={styles.summaryLabel}>Meets Criteria</div>
             <div className={styles.summaryValue}>{stats.meetsCriteria}</div>
-          </div>
-          <div className={styles.summaryBox}>
+          </button>
+          <button 
+            className={`${styles.summaryBox} ${activeFilter === 'falls' ? styles.summaryBoxActive : ''}`}
+            onClick={() => setActiveFilter('falls')}
+          >
             <div className={styles.summaryLabel}>Falls Criteria</div>
             <div className={styles.summaryValue}>{stats.fallsCriteria}</div>
-          </div>
+          </button>
         </div>
 
         {/* Table */}

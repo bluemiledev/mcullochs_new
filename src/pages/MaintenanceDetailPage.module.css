@@ -56,22 +56,45 @@
 
 .summaryContainer {
   display: flex;
-  gap: 16px;
+  gap: 8px;
   margin-bottom: 24px;
+  justify-content: center;
 }
 
 .summaryBox {
-  flex: 1;
-  padding: 16px;
-  background-color: #f9fafb;
+  flex: 0 1 auto;
+  padding: 8px 12px;
+  background-color: #ffffff;
   border: 1px solid #e5e7eb;
-  border-radius: 4px;
-  text-align: center;
+  border-radius: 6px;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 120px;
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  font-family: inherit;
 }
 
-.summaryBoxHighlight {
+.summaryBox:hover {
+  border-color: #d1d5db;
+  background-color: #f9fafb;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
+}
+
+.summaryBoxActive {
   background-color: #374151;
   border-color: #374151;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.15);
+}
+
+.summaryBoxActive:hover {
+  background-color: #4b5563;
+  border-color: #4b5563;
 }
 
 .summaryLabel {
@@ -80,20 +103,21 @@
   color: #6b7280;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  margin-bottom: 8px;
+  margin: 0;
 }
 
-.summaryBoxHighlight .summaryLabel {
+.summaryBoxActive .summaryLabel {
   color: #d1d5db;
 }
 
 .summaryValue {
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 700;
   color: #1f2937;
+  margin: 0;
 }
 
-.summaryBoxHighlight .summaryValue {
+.summaryBoxActive .summaryValue {
   color: #ffffff;
 }
 

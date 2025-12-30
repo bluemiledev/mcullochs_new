@@ -2,9 +2,21 @@ import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { DayPicker } from 'react-day-picker';
 import 'react-day-picker/dist/style.css';
+import html2canvas from 'html2canvas';
 import styles from './FilterControls.module.css';
 import { formatDateForDisplay, formatDateForAPI } from '../utils';
 import McCullochsLogo from './McCullochsLogo';
+
+// Helper function to convert HTML table to canvas using html2canvas
+const convertTableToCanvas = (tableContainer: HTMLElement): Promise<HTMLCanvasElement> => {
+  return html2canvas(tableContainer, {
+    backgroundColor: '#ffffff',
+    scale: 2, // Higher quality
+    logging: false,
+    useCORS: true,
+    allowTaint: true
+  });
+};
 
 // Helper function to convert container (including SVG and overlays) to canvas
 const containerToCanvas = (container: HTMLElement): Promise<HTMLCanvasElement> => {
@@ -405,6 +417,8 @@ const drawOverlaysToCanvas = (ctx: CanvasRenderingContext2D, container: HTMLElem
 const printChart = () => {
   const digitalContainer = document.getElementById('digitalSignalContainer');
   const analogContainer = document.getElementById('analogChartsContainer');
+  const drillingTableContainer = document.getElementById('drillingOperationsTable');
+  const maintenanceTablesContainer = document.getElementById('maintenanceTablesContainer');
 
   // Collect all canvas elements from both containers
   const canvases: HTMLCanvasElement[] = [];
@@ -413,6 +427,25 @@ const printChart = () => {
   }
   if (analogContainer) {
     canvases.push(...Array.from(analogContainer.querySelectorAll('canvas')));
+  }
+  
+  // Check if we're in maintenance mode (tables only, no graphs)
+  // If maintenance tables container exists and there are no charts to print, print tables only
+  const hasCharts = (digitalContainer && digitalContainer.children.length > 0) || 
+                    (analogContainer && analogContainer.children.length > 0) ||
+                    canvases.length > 0;
+  
+  // If in maintenance mode (has tables but no charts), only print tables
+  if (maintenanceTablesContainer && !hasCharts && !drillingTableContainer) {
+    convertTableToCanvas(maintenanceTablesContainer)
+      .then(tableCanvas => {
+        printWithCanvases([tableCanvas]);
+      })
+      .catch(error => {
+        console.error('Error converting maintenance tables to canvas:', error);
+        alert("Error preparing tables for printing!");
+      });
+    return;
   }
 
   // If no canvas elements found, convert containers (including SVG and overlays) to canvas
@@ -498,6 +531,9 @@ const printChart = () => {
       }
     }
 
+    // If in drilling mode, also include the drilling table (convert separately)
+    // Note: We'll handle the table separately after converting charts
+
     if (containersToConvert.length === 0) {
       alert("No charts found to print!");
       return;
@@ -506,11 +542,39 @@ const printChart = () => {
     // Convert all containers (including SVG and overlays) to canvas
     Promise.all(containersToConvert.map(container => containerToCanvas(container)))
       .then(convertedCanvases => {
-        printWithCanvases(convertedCanvases);
+        // If drilling table exists, convert it and add to the list
+        if (drillingTableContainer) {
+          return convertTableToCanvas(drillingTableContainer)
+            .then(tableCanvas => [...convertedCanvases, tableCanvas])
+            .catch(error => {
+              console.error('Error converting table to canvas:', error);
+              // Return charts anyway if table conversion fails
+              return convertedCanvases;
+            });
+        }
+        return convertedCanvases;
+      })
+      .then(allCanvases => {
+        printWithCanvases(allCanvases);
       })
       .catch(error => {
         console.error('Error converting containers to canvas:', error);
         alert("Error preparing charts for printing!");
+      });
+    return;
+  }
+
+  // If we have canvases and drilling table, convert table to canvas too
+  if (canvases.length > 0 && drillingTableContainer) {
+    // For HTML tables, use a simpler approach: convert to image via data URL
+    convertTableToCanvas(drillingTableContainer)
+      .then(tableCanvas => {
+        printWithCanvases([...canvases, tableCanvas]);
+      })
+      .catch(error => {
+        console.error('Error converting table to canvas:', error);
+        // Print charts anyway even if table conversion fails
+        printWithCanvases(canvases);
       });
     return;
   }
@@ -622,13 +686,20 @@ const FilterControls: React.FC = () => {
     const onAssetSelected = (e: any) => {
       const deviceId = String(e?.detail?.device_id || '');
       const date = String(e?.detail?.date || '');
+      const reportType = e?.detail?.reportType;
+      
       if (deviceId) {
-        console.log('📋 FilterControls: Received asset selection:', { deviceId, date });
+        console.log('📋 FilterControls: Received asset selection:', { deviceId, date, reportType });
         setSelectedVehicleId(deviceId);
         // Always set the date from the modal if provided
         if (date) {
           setSelectedDate(date);
           console.log('📋 FilterControls: Set date from asset selection:', date);
+        }
+        // Set screen mode from reportType if provided
+        if (reportType === 'Maintenance' || reportType === 'Drilling') {
+          setScreenMode(reportType);
+          console.log('🔄 FilterControls: Screen mode set from asset selection:', reportType);
         }
       }
     };
@@ -793,6 +864,22 @@ const FilterControls: React.FC = () => {
     return () => { aborted = true; };
   }, [selectedVehicleId]);
   */
+
+  // Listen to screen mode changes from AssetSelectionModal
+  useEffect(() => {
+    const handleScreenModeChangeEvent = (e: any) => {
+      const mode = e?.detail?.mode;
+      if (mode === 'Maintenance' || mode === 'Drilling') {
+        setScreenMode(mode);
+        console.log('🔄 FilterControls: Screen mode changed to:', mode);
+      }
+    };
+    
+    window.addEventListener('screen-mode:changed', handleScreenModeChangeEvent as any);
+    return () => {
+      window.removeEventListener('screen-mode:changed', handleScreenModeChangeEvent as any);
+    };
+  }, []);
 
   // Handle screen mode change (Maintenance/Drilling)
   const handleScreenModeChange = (mode: 'Maintenance' | 'Drilling') => {

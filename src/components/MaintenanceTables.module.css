@@ -104,8 +104,8 @@
 
 .viewButton {
   padding: 4px 10px;
-  background-color: #3b82f6;
-  color: #ffffff;
+  background: none;
+  color: #625f5f;
   border: none;
   border-radius: 3px;
   font-size: 10px;
@@ -115,12 +115,10 @@
 }
 
 .viewButton:hover {
-  background-color: #2563eb;
+ color: #000000;
 }
 
-.viewButton:active {
-  background-color: #1d4ed8;
-}
+
 
 .dataTable tbody tr:last-child td {
   border-bottom: none;

@@ -25,6 +25,7 @@
     "clsx": "^1.2.1",
     "date-fns": "^2.30.0",
     "downsample-lttb": "^0.0.1",
+    "html2canvas": "^1.4.1",
     "leaflet": "^1.9.4",
     "react": "^18.2.0",
     "react-chartjs-2": "^5.2.0",
