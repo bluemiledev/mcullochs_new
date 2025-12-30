@@ -1,45 +1,42 @@
 .tableContainer {
   width: 100%;
-  margin: 40px 0;
-  padding: 20px;
+  margin: 20px 0;
+  padding: 10px;
   background-color: #ffffff;
-  border-radius: 8px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  border-radius: 4px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
 }
 
 .tableHeader {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 20px;
+  margin-bottom: 8px;
 }
 
 .tableTitle {
-  font-size: 18px;
+  font-size: 12px;
   font-weight: 600;
   color: #1f2937;
   margin: 0;
   text-align: left;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 0;
 }
 
 .exportButtons {
   display: flex;
-  gap: 10px;
+  gap: 6px;
 }
 
 .exportButton {
-  padding: 8px 20px;
-  font-size: 14px;
+  padding: 4px 10px;
+  font-size: 10px;
   font-weight: 600;
   color: #ffffff;
   background-color: #3b82f6;
   border: none;
-  border-radius: 6px;
+  border-radius: 3px;
   cursor: pointer;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 0;
   transition: background-color 0.2s ease;
 }
 
@@ -62,22 +59,23 @@
 }
 
 .operationsTable th {
-  padding: 12px 16px;
-  text-align: left;
-  font-size: 12px;
+  padding: 4px 6px;
+  font-size: 10px;
   font-weight: 600;
   color: #374151;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 0;
   border: 1px solid #e5e7eb;
 }
 
 .outputNameHeader {
-  width: 40%;
+  width: 60%;
+  text-align: left;
 }
 
 .valueRangeHeader {
-  width: 10%;
+  width: 40%;
+  text-align: center;
 }
 
 .operationsTable tbody tr {
@@ -89,8 +87,8 @@
 }
 
 .operationsTable td {
-  padding: 12px 16px;
-  font-size: 13px;
+  padding: 4px 6px;
+  font-size: 11px;
   color: #1f2937;
   border: 1px solid #e5e7eb;
 }

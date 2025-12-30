@@ -1,0 +1,132 @@
+.maintenanceTablesContainer {
+  padding: 10px;
+  background-color: #ffffff;
+}
+
+.tableSection {
+  margin-bottom: 20px;
+}
+
+.tableHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+  padding: 6px 8px;
+  background-color: #f3f4f6;
+  border-radius: 4px;
+}
+
+.tableTitle {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: #1f2937;
+  text-transform: uppercase;
+  letter-spacing: 0;
+}
+
+.tableActions {
+  display: flex;
+  gap: 8px;
+}
+
+.searchInput {
+  padding: 4px 8px;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  font-size: 10px;
+  width: 150px;
+}
+
+.searchInput:focus {
+  outline: none;
+  border-color: #3b82f6;
+}
+
+.dataTable {
+  width: 100%;
+  border-collapse: collapse;
+  background-color: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.dataTable thead {
+  background-color: #f3f4f6;
+}
+
+.dataTable th {
+  padding: 4px 6px;
+  font-weight: 600;
+  font-size: 10px;
+  color: #374151;
+  text-transform: uppercase;
+  letter-spacing: 0;
+  border: 1px solid #e5e7eb;
+}
+
+.outputNameHeader {
+  width: 60%;
+  text-align: left;
+}
+
+.outputHeader {
+  width: 25%;
+  text-align: center;
+}
+
+.actionHeader {
+  width: 15%;
+  text-align: center;
+}
+
+.dataTable td {
+  padding: 4px 6px;
+  border: 1px solid #e5e7eb;
+  font-size: 11px;
+  color: #1f2937;
+}
+
+.outputNameCell {
+  font-weight: 500;
+}
+
+.outputCell {
+  color: #6b7280;
+  text-align: center;
+}
+
+.actionCell {
+  text-align: center;
+}
+
+.viewButton {
+  padding: 4px 10px;
+  background-color: #3b82f6;
+  color: #ffffff;
+  border: none;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.viewButton:hover {
+  background-color: #2563eb;
+}
+
+.viewButton:active {
+  background-color: #1d4ed8;
+}
+
+.dataTable tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.dataTable tbody tr:hover {
+  background-color: #f9fafb;
+}
+

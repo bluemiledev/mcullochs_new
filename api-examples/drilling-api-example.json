@@ -1,0 +1,212 @@
+{
+  "success": true,
+  "data": {
+    "timestamps": [
+      {
+        "time": "06:00:00",
+        "timestamp": 1736881200000
+      },
+      {
+        "time": "06:01:00",
+        "timestamp": 1736881260000
+      },
+      {
+        "time": "06:02:00",
+        "timestamp": 1736881320000
+      }
+    ],
+    "analogPerMinute": [
+      {
+        "id": "A1",
+        "name": "Drill Bit Temperature",
+        "unit": "°C",
+        "color": "#ef4444",
+        "display": true,
+        "resolution": 1,
+        "offset": 0,
+        "yAxisRange": {
+          "min": 0,
+          "max": 200
+        },
+        "points": [
+          {
+            "time": "06:00:00",
+            "avg": 120.5,
+            "min": 115.2,
+            "max": 125.8
+          },
+          {
+            "time": "06:01:00",
+            "avg": 121.3,
+            "min": 116.0,
+            "max": 126.6
+          },
+          {
+            "time": "06:02:00",
+            "avg": 122.1,
+            "min": 116.8,
+            "max": 127.4
+          }
+        ]
+      },
+      {
+        "id": "A2",
+        "name": "Drill Pressure",
+        "unit": "PSI",
+        "color": "#3b82f6",
+        "display": true,
+        "resolution": 1,
+        "offset": 0,
+        "yAxisRange": {
+          "min": 0,
+          "max": 5000
+        },
+        "points": [
+          {
+            "time": "06:00:00",
+            "avg": 2500.5,
+            "min": 2400.2,
+            "max": 2600.8
+          },
+          {
+            "time": "06:01:00",
+            "avg": 2510.3,
+            "min": 2410.0,
+            "max": 2610.6
+          },
+          {
+            "time": "06:02:00",
+            "avg": 2520.1,
+            "min": 2419.8,
+            "max": 2620.4
+          }
+        ]
+      },
+      {
+        "id": "A3",
+        "name": "Circulation Flow Rate",
+        "unit": "L/min",
+        "color": "#10b981",
+        "display": true,
+        "resolution": 1,
+        "offset": 0,
+        "yAxisRange": {
+          "min": 0,
+          "max": 500
+        },
+        "points": [
+          {
+            "time": "06:00:00",
+            "avg": 300.5,
+            "min": 290.2,
+            "max": 310.8
+          },
+          {
+            "time": "06:01:00",
+            "avg": 301.3,
+            "min": 291.0,
+            "max": 311.6
+          },
+          {
+            "time": "06:02:00",
+            "avg": 302.1,
+            "min": 291.8,
+            "max": 312.4
+          }
+        ]
+      },
+      {
+        "id": "A4",
+        "name": "Rod Tripping Speed",
+        "unit": "m/min",
+        "color": "#f59e0b",
+        "display": true,
+        "resolution": 1,
+        "offset": 0,
+        "yAxisRange": {
+          "min": 0,
+          "max": 50
+        },
+        "points": [
+          {
+            "time": "06:00:00",
+            "avg": 25.5,
+            "min": 23.2,
+            "max": 27.8
+          },
+          {
+            "time": "06:01:00",
+            "avg": 25.8,
+            "min": 23.5,
+            "max": 28.1
+          },
+          {
+            "time": "06:02:00",
+            "avg": 26.1,
+            "min": 23.8,
+            "max": 28.4
+          }
+        ]
+      },
+      {
+        "id": "A5",
+        "name": "Airlifting Pressure",
+        "unit": "PSI",
+        "color": "#8b5cf6",
+        "display": true,
+        "resolution": 1,
+        "offset": 0,
+        "yAxisRange": {
+          "min": 0,
+          "max": 400
+        },
+        "points": [
+          {
+            "time": "06:00:00",
+            "avg": 200.5,
+            "min": 195.2,
+            "max": 205.8
+          },
+          {
+            "time": "06:01:00",
+            "avg": 201.3,
+            "min": 196.0,
+            "max": 206.6
+          },
+          {
+            "time": "06:02:00",
+            "avg": 202.1,
+            "min": 196.8,
+            "max": 207.4
+          }
+        ]
+      }
+    ],
+    "tableData": {
+      "DRILLING TIME (OD101)": {
+        "value": 450,
+        "max": 720
+      },
+      "CIRCULATING/SURVEY TIME (OD102)": {
+        "value": 380,
+        "max": 720
+      },
+      "ROD TRIPPING TIME (OD103)": {
+        "value": 320,
+        "max": 720
+      },
+      "IDLE TIME 1 (OD104)": {
+        "value": 150,
+        "max": 720
+      },
+      "IDLE TIME 2 (OD105)": {
+        "value": 100,
+        "max": 720
+      },
+      "AIRLIFTING (OD106)": {
+        "value": 280,
+        "max": 720
+      }
+    }
+  }
+}

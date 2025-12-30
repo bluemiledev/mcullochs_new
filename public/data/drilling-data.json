@@ -24558,30 +24558,29 @@
       ]
     }
   ],
-  "digitalPerMinute": [],
   "tableData": {
-    "DRILLING TIME": {
-      "value": 450,
+    "DRILLING TIME (OD101)": {
+      "value": 260.967,
       "max": 720
     },
-    "CIRCULATING/SURVEY TIME": {
-      "value": 380,
+    "CIRCULATING/SURVEY TIME (OD102)": {
+      "value": 337.333,
       "max": 720
     },
-    "ROD TRIPPING TIME": {
-      "value": 320,
+    "ROD TRIPPING TIME (OD103)": {
+      "value": 130.783,
       "max": 720
     },
-    "IDLE TIME 1": {
-      "value": 150,
+    "IDLE TIME 1 (OD104)": {
+      "value": 400.2,
       "max": 720
     },
-    "IDLE TIME 2": {
-      "value": 100,
+    "IDLE TIME 2 (OD105)": {
+      "value": 490.95,
       "max": 720
     },
-    "AIRLIFTING": {
-      "value": 280,
+    "AIRLIFTING (OD106)": {
+      "value": 659.167,
       "max": 720
     }
   }

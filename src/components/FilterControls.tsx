@@ -941,8 +941,7 @@ const FilterControls: React.FC = () => {
           <button 
             className={styles.filterButton} 
             onClick={() => {
-              // DISABLED - Popup functionality disabled
-              // window.dispatchEvent(new CustomEvent('filters:open'));
+              window.dispatchEvent(new CustomEvent('filters:open'));
             }}
           >
             Additional Filters

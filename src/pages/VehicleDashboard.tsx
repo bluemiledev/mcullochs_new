@@ -6,8 +6,11 @@ import DigitalSignalTimeline from '../components/DigitalSignalTimeline';
 import AnalogChart from '../components/AnalogChart';
 import AssetSelectionModal from '../components/AssetSelectionModal';
 import FilterOptionsModal from '../components/FilterOptionsModal';
+import DrillingFilterModal from '../components/DrillingFilterModal';
+import MaintenanceFilterModal from '../components/MaintenanceFilterModal';
 import ErrorModal from '../components/ErrorModal';
 import DrillingOperationsTable from '../components/DrillingOperationsTable';
+import MaintenanceTables from '../components/MaintenanceTables';
 import styles from './VehicleDashboard.module.css';
 import { useTimeContext } from '../context/TimeContext';
 import { useDataProcessor } from '../hooks/useDataProcessor';
@@ -64,7 +67,17 @@ const VehicleDashboard: React.FC = () => {
   const [selectedHourRange, setSelectedHourRange] = useState<{ start: string; end: string; label: string } | null>(null);
   const [screenMode, setScreenMode] = useState<'Maintenance' | 'Drilling'>('Maintenance');
   const [tableData, setTableData] = useState<Record<string, { value: number; max: number }> | null>(null);
+  const [showDrillingFilters, setShowDrillingFilters] = useState<boolean>(false);
+  const [visibleDownholeCharts, setVisibleDownholeCharts] = useState<Record<string, boolean>>({});
+  const [visibleRigOpsRows, setVisibleRigOpsRows] = useState<Record<string, boolean>>({});
+  const [visibleMaintenanceRows, setVisibleMaintenanceRows] = useState<Record<string, boolean>>({});
+  const [maintenanceTablesData, setMaintenanceTablesData] = useState<{
+    reportingOutputs?: Record<string, { value: number; max: number; unit: string }>;
+    faultReportingAnalog?: Record<string, { value: number; max: number; unit: string }>;
+    faultReportingDigital?: Record<string, { value: number; max: number; unit: string }>;
+  } | null>(null);
   const { processData, getWindow, clearCache } = useDataProcessor();
+
   const [errorModal, setErrorModal] = useState<{
     isOpen: boolean;
     message: string;
@@ -423,6 +436,24 @@ useEffect(() => {
     fetchDates();
   }, [selectedVehicleId]);
 
+  // Listen to filters:open event for drilling filters
+  useEffect(() => {
+    const onFiltersOpen = () => {
+      if (screenMode === 'Drilling') {
+        setShowDrillingFilters(true);
+        setShowFilters(false); // Ensure old modal doesn't show
+      } else {
+        setShowFilters(true);
+        setShowDrillingFilters(false); // Ensure drilling modal doesn't show
+      }
+    };
+
+    window.addEventListener('filters:open', onFiltersOpen);
+    return () => {
+      window.removeEventListener('filters:open', onFiltersOpen);
+    };
+  }, [screenMode]);
+
   // Listen to top-left controls events
   useEffect(() => {
     const onApply = (e: any) => {
@@ -499,11 +530,53 @@ useEffect(() => {
     };
   }, [handleShowGraph, showAssetModal]);
 
+  // Load maintenance tables data when in Maintenance mode
+  useEffect(() => {
+    if (screenMode === 'Maintenance' && !showAssetModal) {
+      const loadMaintenanceTables = async () => {
+        try {
+          const response = await fetch('/data/maintenance-tables-data.json');
+          if (response.ok) {
+            const data = await response.json();
+            setMaintenanceTablesData(data);
+            console.log('✅ Loaded maintenance tables data:', data);
+          } else {
+            console.error('❌ Failed to load maintenance tables data');
+          }
+        } catch (error) {
+          console.error('❌ Error loading maintenance tables data:', error);
+        }
+      };
+      loadMaintenanceTables();
+    } else if (screenMode === 'Drilling') {
+      // Clear maintenance tables data when switching to Drilling mode
+      setMaintenanceTablesData(null);
+    }
+  }, [screenMode, showAssetModal]);
+
+  // Debug: Log visibleRigOpsRows when it changes
+  useEffect(() => {
+    if (screenMode === 'Drilling') {
+      console.log('🔍 VehicleDashboard visibleRigOpsRows updated:', visibleRigOpsRows, 'Keys:', Object.keys(visibleRigOpsRows));
+    }
+  }, [visibleRigOpsRows, screenMode]);
+
   // Listen to screen mode change events (Maintenance/Drilling)
   useEffect(() => {
     const handleScreenModeChange = (e: any) => {
       const mode = e?.detail?.mode || 'Maintenance';
       setScreenMode(mode);
+      // Reset filter states when switching modes
+      setShowFilters(false);
+      setShowDrillingFilters(false);
+      if (mode === 'Drilling') {
+        // Reset drilling filter states to all visible
+        setVisibleDownholeCharts({});
+        setVisibleRigOpsRows({});
+      } else if (mode === 'Maintenance') {
+        // Reset maintenance filter states to all visible
+        setVisibleMaintenanceRows({});
+      }
       console.log('🔄 Screen mode changed to:', mode);
     };
     
@@ -2210,7 +2283,7 @@ useEffect(() => {
         end6PM.setHours(18, 0, 0, 0);
         
         const center = new Date(Math.floor((start6AM.getTime() + end6PM.getTime()) / 2));
-        setSelectedTime(center);
+          setSelectedTime(center);
         setSelectionStart(start6AM);
         setSelectionEnd(end6PM);
         
@@ -2461,8 +2534,20 @@ useEffect(() => {
           </div>
         )}
         <div className={styles.scrollContent}>
-          {/* Digital Signal Timeline Chart - Only show in Maintenance mode */}
-          {screenMode === 'Maintenance' && (
+          {/* Maintenance Mode: Show Tables Instead of Graphs */}
+          {screenMode === 'Maintenance' && maintenanceTablesData ? (
+            <MaintenanceTables
+              reportingOutputs={maintenanceTablesData.reportingOutputs}
+              faultReportingAnalog={maintenanceTablesData.faultReportingAnalog}
+              faultReportingDigital={maintenanceTablesData.faultReportingDigital}
+              selectionStart={selectionStart}
+              selectionEnd={selectionEnd}
+              visibleRows={visibleMaintenanceRows}
+            />
+          ) : (
+            <>
+              {/* Digital Signal Timeline Chart - Only show in Maintenance mode (if tables not loaded) */}
+              {screenMode === 'Maintenance' && (
           <div id="digitalSignalContainer">
             {digitalStatusChart && digitalStatusChart.metrics.length > 0 && (
               <DigitalSignalTimeline
@@ -2470,13 +2555,14 @@ useEffect(() => {
                 selectedTime={selectedTime}
                 crosshairActive={crosshairActive}
                 timeDomain={timeDomain}
-                  isSecondViewMode={false}
+                      isSecondViewMode={false}
               />
             )}
           </div>
-          )}
+              )}
 
-          {/* Analog Charts */}
+              {/* Analog Charts - Only show in Drilling mode */}
+              {screenMode === 'Drilling' && (
           <div id="analogChartsContainer" className={styles.chartsContainer} data-print-full-page={forceAllChartsVisible}>
             {(() => {
               // Debug: Log filter results
@@ -2484,7 +2570,20 @@ useEffect(() => {
                 console.log('🖨️ forceAllChartsVisible is TRUE - showing all', vehicleMetrics.length, 'charts');
               }
               const filtered = vehicleMetrics.filter(m => {
-                const shouldShow = forceAllChartsVisible || (visibleAnalog[m.id] ?? true);
+                // Check standard analog visibility
+                let shouldShow = forceAllChartsVisible || (visibleAnalog[m.id] ?? true);
+                
+                // For drilling mode, also check downhole chart filters
+                if (screenMode === 'Drilling' && shouldShow) {
+                  // If no filters are applied (empty object), show all charts
+                  if (Object.keys(visibleDownholeCharts).length === 0) {
+                    shouldShow = true;
+                  } else {
+                    // If filters are applied, only show charts where visibility is explicitly true
+                    shouldShow = visibleDownholeCharts[m.name] === true;
+                  }
+                }
+                
                 if (!shouldShow && forceAllChartsVisible) {
                   console.warn('🖨️ Chart filtered out despite forceAllChartsVisible:', m.id);
                 }
@@ -2553,24 +2652,73 @@ useEffect(() => {
       </div>
             )}
     </div>
+              )}
 
-          {/* Operations Table */}
-          <DrillingOperationsTable 
-            mode={screenMode} 
-            tableData={tableData || undefined}
-            selectionStart={selectionStart}
-            selectionEnd={selectionEnd}
-          />
+              {/* Operations Table - Only show in Drilling mode */}
+              {screenMode === 'Drilling' && (
+                <DrillingOperationsTable 
+                  mode={screenMode} 
+                  tableData={tableData || undefined}
+                  selectionStart={selectionStart}
+                  selectionEnd={selectionEnd}
+                  visibleRows={visibleRigOpsRows}
+                />
+              )}
+            </>
+          )}
         </div>
       </div>
     </div>
-    {showFilters && (
-      <FilterOptionsModal
+    {showFilters && screenMode === 'Maintenance' && maintenanceTablesData && (
+      <MaintenanceFilterModal
         isOpen={showFilters}
         onClose={() => setShowFilters(false)}
-        onApply={(d, a) => { setVisibleDigital(d); setVisibleAnalog(a); setShowFilters(false); }}
-        initialDigital={visibleDigital}
-        initialAnalog={visibleAnalog}
+        onApply={(rows) => {
+          console.log('🔍 Maintenance filter applied:', rows);
+          setVisibleMaintenanceRows(rows);
+          setShowFilters(false);
+        }}
+        initialRows={visibleMaintenanceRows}
+        availableTableRows={[
+          ...(maintenanceTablesData.reportingOutputs ? Object.keys(maintenanceTablesData.reportingOutputs).map(name => ({ name, section: 'MAINTENANCE - REPORTING OUTPUTS' })) : []),
+          ...(maintenanceTablesData.faultReportingAnalog ? Object.keys(maintenanceTablesData.faultReportingAnalog).map(name => ({ name, section: 'MAINTENANCE - FAULT REPORTING OUTPUTS (ANALOG)' })) : []),
+          ...(maintenanceTablesData.faultReportingDigital ? Object.keys(maintenanceTablesData.faultReportingDigital).map(name => ({ name, section: 'MAINTENANCE - FAULT REPORTING OUTPUTS (DIGITAL)' })) : [])
+        ]}
+      />
+    )}
+    {showDrillingFilters && screenMode === 'Drilling' && (
+      <DrillingFilterModal
+        isOpen={showDrillingFilters}
+        onClose={() => setShowDrillingFilters(false)}
+        onApply={(downhole, rigOps) => {
+          // Store visibility directly (true = visible, false = hidden)
+          console.log('🔍 onApply called with:', { 
+            downhole, 
+            rigOps, 
+            rigOpsKeys: Object.keys(rigOps),
+            rigOpsEntries: Object.entries(rigOps)
+          });
+          console.log('🔍 Setting visibleRigOpsRows to:', rigOps);
+          setVisibleDownholeCharts(downhole);
+          setVisibleRigOpsRows(rigOps);
+          setShowDrillingFilters(false);
+        }}
+        initialDownhole={visibleDownholeCharts}
+        initialRigOps={visibleRigOpsRows}
+        availableCharts={vehicleMetrics.map(m => ({ name: m.name, id: m.id }))}
+        availableTableRows={tableData ? Object.keys(tableData).map(key => {
+          // Extract OD code from key like "DRILLING TIME (OD101)" -> "OD101"
+          // The OD code is always at the end in parentheses like (OD101)
+          let code = key; // fallback
+          // Match pattern: (OD followed by digits) at the end
+          const odMatch = key.match(/\(OD\d+\)$/);
+          if (odMatch) {
+            // Extract OD101 from (OD101)
+            code = odMatch[0].substring(1, odMatch[0].length - 1);
+          }
+          console.log(`🔍 Extracting from "${key}": code="${code}"`);
+          return { name: key, code };
+        }) : []}
       />
     )}
     </React.Fragment>

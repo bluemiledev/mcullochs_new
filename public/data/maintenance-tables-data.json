@@ -1,0 +1,160 @@
+{
+  "reportingOutputs": {
+    "ENGINE - TIME ENGAGED": {
+      "value": 383,
+      "max": 720,
+      "unit": "HOURS"
+    },
+    "ROTATION - TIME WORKED": {
+      "value": 400,
+      "max": 720,
+      "unit": "HOURS"
+    },
+    "CHARGE PUMP - TIME (OM003)": {
+      "value": 445,
+      "max": 720,
+      "unit": "HOURS"
+    },
+    "M18 PUMP - TIME (OM004)": {
+      "value": 479,
+      "max": 720,
+      "unit": "HOURS"
+    },
+    "BEAN PUMP - TIME (OM005)": {
+      "value": 514,
+      "max": 720,
+      "unit": "HOURS"
+    },
+    "MAIN WINCH - HOURS (OM006)": {
+      "value": 576,
+      "max": 720,
+      "unit": "HOURS"
+    },
+    "MAIN WINCH - DISTANCE (OM007)": {
+      "value": 400,
+      "max": 1000,
+      "unit": "METERS"
+    },
+    "HEAD TRAVERSE - TIME (OM008)": {
+      "value": 514,
+      "max": 720,
+      "unit": "HOURS"
+    },
+    "HEAD TRAVERSE - DISTANCE (OM009)": {
+      "value": 400,
+      "max": 1000,
+      "unit": "METERS"
+    }
+  },
+  "faultReportingAnalog": {
+    "HYDRAULIC - PUMP 1 OVER PRESSURE (OM101)": {
+      "value": 118,
+      "max": 720,
+      "unit": "HOURS"
+    },
+    "HYDRAULIC - PUMP 2 OVER PRESSURE (OM102)": {
+      "value": 42,
+      "max": 720,
+      "unit": "HOURS"
+    },
+    "HYDRAULIC - PUMP 3 OVER PRESSURE (OM103)": {
+      "value": 249,
+      "max": 720,
+      "unit": "HOURS"
+    },
+    "HYDRAULIC - PUMP 4 OVER PRESSURE (OM104)": {
+      "value": 336,
+      "max": 720,
+      "unit": "HOURS"
+    },
+    "HYDRAULIC - PUMP 5 OVER PRESSURE (OM105)": {
+      "value": 441,
+      "max": 720,
+      "unit": "HOURS"
+    },
+    "HYDRAULIC - ROTATION MOTOR OVER SPEED (OM112)": {
+      "value": 118,
+      "max": 720,
+      "unit": "HOURS"
+    },
+    "HYDRAULIC - PUMP 1 LADER PRESSURE (OM113)": {
+      "value": 441,
+      "max": 720,
+      "unit": "HOURS"
+    },
+    "HYDRAULIC - PUMP 2 LADER PRESSURE (OM114)": {
+      "value": 336,
+      "max": 720,
+      "unit": "HOURS"
+    },
+    "HYDRAULIC - PUMP 3 LADER PRESSURE (CHARGE) (OM115)": {
+      "value": 118,
+      "max": 720,
+      "unit": "HOURS"
+    },
+    "HYDRAULIC - PUMP 4 LADER PRESSURE (OM116)": {
+      "value": 336,
+      "max": 720,
+      "unit": "HOURS"
+    },
+    "HYDRAULIC - PUMP 5 LADER PRESSURE (OM117)": {
+      "value": 42,
+      "max": 720,
+      "unit": "HOURS"
+    },
+    "HYDRAULIC - HIGH OIL TEMP (OM118)": {
+      "value": 118,
+      "max": 720,
+      "unit": "HOURS"
+    },
+    "M18 - OVERSPEED (OM119)": {
+      "value": 249,
+      "max": 720,
+      "unit": "HOURS"
+    },
+    "CHARGE - OVERSPEED (OM120)": {
+      "value": 118,
+      "max": 720,
+      "unit": "HOURS"
+    },
+    "BEAN - OVERSPEED (OM121)": {
+      "value": 118,
+      "max": 720,
+      "unit": "HOURS"
+    }
+  },
+  "faultReportingDigital": {
+    "HYDRAULIC - PUMP 1 PRESSURE FILTER (DIAG) (OM126)": {
+      "value": 249,
+      "max": 720,
+      "unit": "HOURS"
+    },
+    "HYDRAULIC - PUMP 2 PRESSURE FILTER (DIAG) (OM127)": {
+      "value": 118,
+      "max": 720,
+      "unit": "HOURS"
+    },
+    "HYDRAULIC - PUMP 3 PRESSURE FILTER (DIAG) (OM128)": {
+      "value": 249,
+      "max": 720,
+      "unit": "HOURS"
+    },
+    "HYDRAULIC - PUMP 4 PRESSURE FILTER (DIAG) (OM129)": {
+      "value": 118,
+      "max": 720,
+      "unit": "HOURS"
+    },
+    "HYDRAULIC - PUMP 5 PRESSURE FILTER (DIAG) (OM130)": {
+      "value": 118,
+      "max": 720,
+      "unit": "HOURS"
+    },
+    "HYDRAULIC - LOW OIL LEVEL (OM131)": {
+      "value": 514,
+      "max": 720,
+      "unit": "HOURS"
+    }
+  }
+}
+
+

@@ -1,0 +1,211 @@
+.container {
+  width: 100%;
+  min-height: 100vh;
+  background-color: #ffffff;
+}
+
+.content {
+  padding: 20px;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+.scrubberContainer {
+  margin-bottom: 24px;
+  padding: 16px;
+  background-color: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 4px;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  margin-bottom: 24px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.backButton {
+  background-color: #000000;
+  color: #ffffff;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s;
+  margin-right: 16px;
+}
+
+.backButton:hover {
+  background-color: #333333;
+}
+
+.title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1f2937;
+  margin: 0;
+  flex: 1;
+  text-align: center;
+  text-transform: uppercase;
+  letter-spacing: 0;
+}
+
+.summaryContainer {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.summaryBox {
+  flex: 1;
+  padding: 16px;
+  background-color: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 4px;
+  text-align: center;
+}
+
+.summaryBoxHighlight {
+  background-color: #374151;
+  border-color: #374151;
+}
+
+.summaryLabel {
+  font-size: 10px;
+  font-weight: 600;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 8px;
+}
+
+.summaryBoxHighlight .summaryLabel {
+  color: #d1d5db;
+}
+
+.summaryValue {
+  font-size: 18px;
+  font-weight: 700;
+  color: #1f2937;
+}
+
+.summaryBoxHighlight .summaryValue {
+  color: #ffffff;
+}
+
+.tableContainer {
+  margin-bottom: 24px;
+  border: 1px solid #e5e7eb;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.dataTable {
+  width: 100%;
+  border-collapse: collapse;
+  background-color: #ffffff;
+}
+
+.dataTable thead {
+  background-color: #f3f4f6;
+}
+
+.dataTable th {
+  padding: 8px 12px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #374151;
+  text-transform: uppercase;
+  letter-spacing: 0;
+  text-align: left;
+  border: 1px solid #e5e7eb;
+}
+
+.timeHeader {
+  width: 50%;
+}
+
+.valueHeader {
+  width: 50%;
+}
+
+.dataTable td {
+  padding: 8px 12px;
+  font-size: 11px;
+  color: #1f2937;
+  border: 1px solid #e5e7eb;
+}
+
+.timeCell {
+  font-weight: 500;
+  color: #374151;
+}
+
+.valueCell {
+  font-weight: 600;
+  color: #059669;
+}
+
+.noData {
+  text-align: center;
+  color: #6b7280;
+  font-style: italic;
+  padding: 24px;
+}
+
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 16px 0;
+}
+
+.paginationButton {
+  background: none;
+  border: 1px solid #e5e7eb;
+  padding: 6px 12px;
+  font-size: 12px;
+  color: #374151;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: all 0.2s;
+  min-width: 32px;
+}
+
+.paginationButton:hover:not(:disabled) {
+  background-color: #f3f4f6;
+  border-color: #d1d5db;
+}
+
+.paginationButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.paginationNumber {
+  font-weight: 500;
+}
+
+.paginationActive {
+  background-color: #374151;
+  color: #ffffff;
+  border-color: #374151;
+}
+
+.paginationActive:hover {
+  background-color: #4b5563;
+  border-color: #4b5563;
+}
+
+.error {
+  padding: 24px;
+  text-align: center;
+  color: #dc2626;
+  font-size: 14px;
+}
+

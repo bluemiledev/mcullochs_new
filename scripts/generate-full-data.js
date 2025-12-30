@@ -224,14 +224,13 @@ const drillingData = {
       }))
     }
   ],
-  digitalPerMinute: [],
   tableData: {
-    "DRILLING TIME": { value: 450, max: 720 },
-    "CIRCULATING/SURVEY TIME": { value: 380, max: 720 },
-    "ROD TRIPPING TIME": { value: 320, max: 720 },
-    "IDLE TIME 1": { value: 150, max: 720 },
-    "IDLE TIME 2": { value: 100, max: 720 },
-    "AIRLIFTING": { value: 280, max: 720 }
+    "DRILLING TIME (OD101)": { value: 260.967, max: 720 }, // 04:20:58
+    "CIRCULATING/SURVEY TIME (OD102)": { value: 337.333, max: 720 }, // 05:37:20
+    "ROD TRIPPING TIME (OD103)": { value: 130.783, max: 720 }, // 02:10:47
+    "IDLE TIME 1 (OD104)": { value: 400.2, max: 720 }, // 06:40:12
+    "IDLE TIME 2 (OD105)": { value: 490.95, max: 720 }, // 08:10:57
+    "AIRLIFTING (OD106)": { value: 659.167, max: 720 } // 10:59:10
   }
 };
 
@@ -258,4 +257,5 @@ console.log(`   Timestamps: ${drillingData.timestamps.length}`);
 console.log(`   First: ${drillingData.timestamps[0].time}, Last: ${drillingData.timestamps[drillingData.timestamps.length - 1].time}`);
 console.log(`   Analog series: ${drillingData.analogPerMinute.length}, Points per series: ${drillingData.analogPerMinute[0].points.length}`);
 console.log(`   Chart names: ${drillingData.analogPerMinute.map(s => s.name).join(', ')}`);
+
 

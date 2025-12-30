@@ -1,0 +1,87 @@
+{
+  "success": true,
+  "data": {
+    "reportingOutputs": {
+      "ENGINE - TIME (OM001)": {
+        "value": 383,
+        "max": 720,
+        "unit": "HOURS"
+      },
+      "ROTATION - TIME (OM002)": {
+        "value": 400,
+        "max": 720,
+        "unit": "HOURS"
+      },
+      "CHARGE PUMP - TIME (OM003)": {
+        "value": 445,
+        "max": 720,
+        "unit": "HOURS"
+      },
+      "M18 PUMP - TIME (OM004)": {
+        "value": 479,
+        "max": 720,
+        "unit": "HOURS"
+      },
+      "BEAN PUMP - TIME (OM005)": {
+        "value": 514,
+        "max": 720,
+        "unit": "HOURS"
+      },
+      "MAIN WINCH - HOURS (OM006)": {
+        "value": 576,
+        "max": 720,
+        "unit": "HOURS"
+      },
+      "MAIN WINCH - DISTANCE (OM007)": {
+        "value": 400,
+        "max": 1000,
+        "unit": "METERS"
+      },
+      "HEAD TRAVERSE - TIME (OM008)": {
+        "value": 514,
+        "max": 720,
+        "unit": "HOURS"
+      },
+      "HEAD TRAVERSE - DISTANCE (OM009)": {
+        "value": 400,
+        "max": 1000,
+        "unit": "METERS"
+      }
+    },
+    "faultReportingAnalog": {
+      "HYDRAULIC - PUMP 1 OVER PRESSURE (OM101)": {
+        "value": 245,
+        "max": 720,
+        "unit": "HOURS"
+      },
+      "HYDRAULIC - PUMP 2 OVER PRESSURE (OM102)": {
+        "value": 180,
+        "max": 720,
+        "unit": "HOURS"
+      },
+      "ENGINE - OIL PRESSURE LOW (OM103)": {
+        "value": 120,
+        "max": 720,
+        "unit": "HOURS"
+      }
+    },
+    "faultReportingDigital": {
+      "ENGINE - OVERHEAT (OM201)": {
+        "value": 45,
+        "max": 720,
+        "unit": "HOURS"
+      },
+      "HYDRAULIC - SYSTEM FAULT (OM202)": {
+        "value": 30,
+        "max": 720,
+        "unit": "HOURS"
+      },
+      "ROTATION - EMERGENCY STOP (OM203)": {
+        "value": 15,
+        "max": 720,
+        "unit": "HOURS"
+      }
+    }
+  }
+}
+

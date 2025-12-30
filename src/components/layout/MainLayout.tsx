@@ -4,6 +4,7 @@ import { TimeProvider } from '../../context/TimeContext';
 import FilterControls from '../FilterControls';
 import VehicleDashboard from '../../pages/VehicleDashboard';
 import TableReport from '../../pages/TableReport';
+import MaintenanceDetailPage from '../../pages/MaintenanceDetailPage';
 import styles from './MainLayout.module.css';
 
 const DashboardContent: React.FC = () => (
@@ -22,6 +23,7 @@ const MainLayout: React.FC = () => {
     <TimeProvider>
       <Routes>
         <Route path="/table" element={<TableReport />} />
+        <Route path="/maintenance-detail" element={<MaintenanceDetailPage />} />
         <Route path="/charts" element={<DashboardContent />} />
         <Route path="/charts/" element={<DashboardContent />} />
         <Route path="/" element={<DashboardContent />} />
