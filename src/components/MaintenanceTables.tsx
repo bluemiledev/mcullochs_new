@@ -69,18 +69,17 @@ const MaintenanceTables: React.FC<MaintenanceTablesProps> = ({
 
   // Calculate current value based on range
   const getCurrentValue = (entry: { value: number; max: number }, unit: string, showUnit: boolean = false): string => {
-    // Value is already in minutes, scale it based on range
-    const scaledValue = (entry.value / 720) * rangeMinutes;
+    // Use the value directly from API, ignore max
+    // The value is already in minutes from the API
     let formattedValue: string;
     
     if (unit === 'HOURS') {
-      formattedValue = formatMinutesToHours(scaledValue);
+      formattedValue = formatMinutesToHours(entry.value);
     } else if (unit === 'METERS') {
-      // For distance, scale proportionally
-      const scaledDistance = (entry.value / 720) * rangeMinutes;
-      formattedValue = `${Math.round(scaledDistance)}`;
+      // For distance, use value directly
+      formattedValue = `${Math.round(entry.value)}`;
     } else {
-      formattedValue = `${Math.round(scaledValue)}`;
+      formattedValue = `${Math.round(entry.value)}`;
     }
     
     // Add unit in parentheses if showUnit is true

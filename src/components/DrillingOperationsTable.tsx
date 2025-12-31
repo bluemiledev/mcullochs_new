@@ -91,20 +91,12 @@ const DrillingOperationsTable: React.FC<DrillingOperationsTableProps> = ({
       const dataEntry = tableData?.[op.outputName];
       let currentValueMinutes = 0;
       
-      if (dataEntry) {
-        // Calculate value based on selected time range
-        // The dataEntry.value represents the value for the full day (720 minutes)
-        // Scale it proportionally based on the selected range
-        if (rangeMinutes >= fullDayMinutes) {
-          // Full range selected, use full value
-          currentValueMinutes = dataEntry.value;
-        } else {
-          // Partial range selected, calculate proportionally
-          // Formula: (fullValue / fullDayMinutes) * rangeMinutes
-          currentValueMinutes = (dataEntry.value / fullDayMinutes) * rangeMinutes;
-        }
+      if (dataEntry && dataEntry.value != null) {
+        // Use the value directly from API, ignore max
+        // The dataEntry.value is already in minutes from the API
+        currentValueMinutes = dataEntry.value;
       } else {
-        // Fallback: calculate based on time range
+        // Fallback: calculate based on time range if no API data
         // For TIME/HOURS fields, value = minutes in range
         if (op.outputName.includes('TIME') || op.outputName.includes('HOURS')) {
           currentValueMinutes = rangeMinutes;
@@ -114,9 +106,6 @@ const DrillingOperationsTable: React.FC<DrillingOperationsTableProps> = ({
           currentValueMinutes = op.maxValue * proportion;
         }
       }
-      
-      // Ensure value doesn't exceed max
-      currentValueMinutes = Math.min(currentValueMinutes, op.maxValue);
       
       // Format output based on mode
       let outputValue: string;

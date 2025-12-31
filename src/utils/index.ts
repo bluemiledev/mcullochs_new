@@ -138,6 +138,39 @@ export const formatDateForAPI = (dateStr: string): string => {
   return dateStr;
 };
 
+/**
+ * Converts shift format from "6 AM to 6 PM" to "06:00:00to18:00:00" for API
+ */
+export const formatShiftForAPI = (shift: string): string => {
+  if (!shift || typeof shift !== 'string') return '06:00:00to18:00:00'; // Default
+  
+  // Check if already in API format
+  if (/^\d{2}:\d{2}:\d{2}to\d{2}:\d{2}:\d{2}$/.test(shift)) {
+    return shift;
+  }
+  
+  // Parse "6 AM to 6 PM" format
+  const match = shift.match(/(\d+)\s*(AM|PM)\s+to\s+(\d+)\s*(AM|PM)/i);
+  if (match) {
+    let startHour = parseInt(match[1], 10);
+    const startPeriod = match[2].toUpperCase();
+    let endHour = parseInt(match[3], 10);
+    const endPeriod = match[4].toUpperCase();
+    
+    // Convert to 24-hour format
+    if (startPeriod === 'PM' && startHour !== 12) startHour += 12;
+    if (startPeriod === 'AM' && startHour === 12) startHour = 0;
+    
+    if (endPeriod === 'PM' && endHour !== 12) endHour += 12;
+    if (endPeriod === 'AM' && endHour === 12) endHour = 0;
+    
+    return `${String(startHour).padStart(2, '0')}:00:00to${String(endHour).padStart(2, '0')}:00:00`;
+  }
+  
+  // Default fallback
+  return '06:00:00to18:00:00';
+};
+
 
 
 

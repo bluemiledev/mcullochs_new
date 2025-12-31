@@ -1,14 +1,12 @@
-import React, { useState } from 'react';
-// COMMENTED OUT - No longer using calendar picker
-// import { DayPicker } from 'react-day-picker';
-// import 'react-day-picker/dist/style.css';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { DayPicker } from 'react-day-picker';
+import 'react-day-picker/dist/style.css';
 import styles from './AssetSelectionModal.module.css';
 import { formatDateForDisplay, formatDateForAPI } from '../utils';
 
 interface Vehicle {
-  id: number;
+  devices_serial_no: string;
   name: string;
-  rego?: string;
 }
 
 interface AssetSelectionModalProps {
@@ -16,74 +14,133 @@ interface AssetSelectionModalProps {
 }
 
 const AssetSelectionModal: React.FC<AssetSelectionModalProps> = ({ onShowGraph }) => {
-  // Static values - no API calls
-  const staticVehicle = { id: 6361819, name: 'Rego 6361819 - MEAQ026', rego: '6361819' };
   const staticShift = '6 AM to 6 PM';
   
+  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+  const [selectedVehicleSerialNo, setSelectedVehicleSerialNo] = useState<string>('');
+  const [dates, setDates] = useState<string[]>([]);
+  const [selectedDate, setSelectedDate] = useState<string>('');
   const [selectedShift, setSelectedShift] = useState<string>(staticShift);
   const [selectedReportType, setSelectedReportType] = useState<'Maintenance' | 'Drilling'>('Maintenance');
   const [error, setError] = useState<string>('');
-  
-  // COMMENTED OUT API CALLS - Using static values
-  /*
-  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
-  const [dates, setDates] = useState<string[]>([]);
   const [loadingVehicles, setLoadingVehicles] = useState<boolean>(true);
   const [loadingDates, setLoadingDates] = useState<boolean>(false);
   const [showCalendar, setShowCalendar] = useState<boolean>(false);
   const calendarRef = useRef<HTMLDivElement>(null);
-  */
-
-  // COMMENTED OUT API CALLS - Using static values
-  /*
-  // Fetch vehicles on mount
+  
+  // Fetch vehicles from API on mount
   useEffect(() => {
     const fetchVehicles = async () => {
-      // ... API code commented out
+      try {
+        setLoadingVehicles(true);
+        setError('');
+        // Use relative URL so proxy can handle it (avoids CORS issues)
+        const response = await fetch('/reet_python/mccullochs/apis/get_vehicles.php', {
+          headers: { 'Accept': 'application/json' },
+          cache: 'no-store',
+          mode: 'cors'
+        });
+        
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
+        const text = await response.text();
+        let json: Vehicle[];
+        
+        try {
+          json = JSON.parse(text);
+        } catch (parseError) {
+          throw new Error('Invalid JSON response from API');
+        }
+        
+        if (Array.isArray(json) && json.length > 0) {
+          setVehicles(json);
+          // Auto-select the first vehicle if none is selected
+          setSelectedVehicleSerialNo(prev => {
+            if (!prev && json[0]?.devices_serial_no) {
+              return json[0].devices_serial_no;
+            }
+            return prev;
+          });
+        } else {
+          setVehicles([]);
+          setError('No vehicles found');
+        }
+      } catch (err: any) {
+        console.error('❌ Error fetching vehicles:', err);
+        setError(err.message || 'Failed to load vehicles');
+        setVehicles([]);
+      } finally {
+        setLoadingVehicles(false);
+      }
     };
+    
     fetchVehicles();
   }, []);
 
   // Fetch dates when vehicle is selected
   useEffect(() => {
-    if (selectedVehicleId) {
-      const fetchDates = async () => {
-        // ... API code commented out
-      };
-      fetchDates();
-    } else {
+    if (!selectedVehicleSerialNo) {
       setDates([]);
       setSelectedDate('');
+      return;
     }
-  }, [selectedVehicleId]);
-  */
 
-  const handleShowGraph = () => {
-    // Use static values
-    const vehicleId = staticVehicle.id;
-    const dateToUse = '2025-10-21'; // Static date
-    // Convert display format (DD-MM-YYYY) back to API format (YYYY-MM-DD) if needed
-    const apiDate = formatDateForAPI(dateToUse);
-    // Dispatch event so FilterControls can initialize with selected values
-    window.dispatchEvent(new CustomEvent('asset:selected', {
-      detail: {
-        device_id: vehicleId,
-        date: apiDate,
-        shift: selectedShift,
-        reportType: selectedReportType
+    const fetchDates = async () => {
+      try {
+        setLoadingDates(true);
+        setError('');
+        // Use relative URL so proxy can handle it (avoids CORS issues)
+        const url = `/reet_python/mccullochs/apis/get_vehicle_dates.php?devices_serial_no=${encodeURIComponent(selectedVehicleSerialNo)}`;
+        const response = await fetch(url, {
+          headers: { 'Accept': 'application/json' },
+          cache: 'no-store',
+          mode: 'cors'
+        });
+        
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
+        const text = await response.text();
+        let json: any;
+        
+        try {
+          json = JSON.parse(text);
+        } catch (parseError) {
+          throw new Error('Invalid JSON response from API');
+        }
+        
+        // API returns array of objects with "date" field: [{ "date": "YYYY-MM-DD" }, ...]
+        if (Array.isArray(json) && json.length > 0) {
+          const dateStrings = json
+            .map((item: any) => item.date)
+            .filter((date: string) => date && typeof date === 'string')
+            .sort((a: string, b: string) => b.localeCompare(a)); // Sort descending (most recent first)
+          
+          setDates(dateStrings);
+          // Auto-select the first (most recent) date if none is selected
+          if (!selectedDate && dateStrings.length > 0) {
+            setSelectedDate(dateStrings[0]);
+          }
+        } else {
+          setDates([]);
+          setSelectedDate('');
+        }
+      } catch (err: any) {
+        console.error('❌ Error fetching dates:', err);
+        setError(err.message || 'Failed to load dates');
+        setDates([]);
+        setSelectedDate('');
+      } finally {
+        setLoadingDates(false);
       }
-    }));
-    // Dispatch screen mode change event
-    window.dispatchEvent(new CustomEvent('screen-mode:changed', {
-      detail: { mode: selectedReportType }
-    }));
-    onShowGraph(vehicleId, apiDate, selectedShift, selectedReportType);
-  };
+    };
+    
+    fetchDates();
+  }, [selectedVehicleSerialNo]);
 
-  const isFormValid = true; // Always valid since we use static values
-
-  // COMMENTED OUT - Using static date, no calendar needed
-  /*
   // Close calendar when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -132,7 +189,42 @@ const AssetSelectionModal: React.FC<AssetSelectionModalProps> = ({ onShowGraph }
     const [year, month, day] = selectedDate.split('-').map(Number);
     return new Date(year, month - 1, day);
   }, [selectedDate]);
-  */
+
+  const handleShowGraph = () => {
+    if (!selectedVehicleSerialNo) {
+      setError('Please select an asset');
+      return;
+    }
+    
+    if (!selectedDate) {
+      setError('Please select a date');
+      return;
+    }
+    
+    // Convert devices_serial_no to number for vehicleId (for backward compatibility)
+    const vehicleId = Number(selectedVehicleSerialNo);
+    // selectedDate is already in YYYY-MM-DD format from API
+    const apiDate = formatDateForAPI(selectedDate);
+    
+    // Dispatch event so FilterControls can initialize with selected values
+    // Use devices_serial_no as device_id
+    window.dispatchEvent(new CustomEvent('asset:selected', {
+      detail: {
+        device_id: selectedVehicleSerialNo, // Use devices_serial_no as string
+        date: apiDate,
+        shift: selectedShift,
+        reportType: selectedReportType
+      }
+    }));
+    // Dispatch screen mode change event
+    window.dispatchEvent(new CustomEvent('screen-mode:changed', {
+      detail: { mode: selectedReportType }
+    }));
+    onShowGraph(vehicleId, apiDate, selectedShift, selectedReportType);
+  };
+
+  const isFormValid = selectedVehicleSerialNo && selectedDate && !loadingVehicles && !loadingDates;
+
 
   return (
     <div className={styles.modalOverlay}>
@@ -148,24 +240,58 @@ const AssetSelectionModal: React.FC<AssetSelectionModalProps> = ({ onShowGraph }
 
         <div className={styles.formGroup}>
           <label className={styles.label}>Select Asset</label>
-          <input
-            type="text"
+          <select
             className={styles.select}
-            value={staticVehicle.name}
-            readOnly
-            disabled
-          />
+            value={selectedVehicleSerialNo}
+            onChange={(e) => setSelectedVehicleSerialNo(e.target.value)}
+            disabled={loadingVehicles}
+          >
+            {loadingVehicles ? (
+              <option value="">Loading vehicles...</option>
+            ) : vehicles.length === 0 ? (
+              <option value="">No vehicles available</option>
+            ) : (
+              <>
+                <option value="">-- Select Asset --</option>
+                {vehicles.map((vehicle) => (
+                  <option key={vehicle.devices_serial_no} value={vehicle.devices_serial_no}>
+                    {vehicle.name}
+                  </option>
+                ))}
+              </>
+            )}
+          </select>
         </div>
 
         <div className={styles.formGroup}>
           <label className={styles.label}>Select Date</label>
-          <input
-            type="text"
-            className={styles.select}
-            value="21-10-2025"
-            readOnly
-            disabled
-          />
+          <div className={styles.datePickerWrapper} ref={calendarRef}>
+            <button
+              type="button"
+              className={styles.datePickerButton}
+              onClick={() => setShowCalendar(!showCalendar)}
+              disabled={!selectedVehicleSerialNo || loadingDates || dates.length === 0}
+            >
+              {loadingDates ? 'Loading dates...' : selectedDate ? formatDateForDisplay(selectedDate) : 'Select Date'}
+            </button>
+            {showCalendar && selectedVehicleSerialNo && dates.length > 0 && (
+              <div className={styles.calendarDropdown}>
+                <DayPicker
+                  mode="single"
+                  selected={selectedDateObj}
+                  onSelect={handleDateSelect}
+                  disabled={isDateDisabled}
+                  className={styles.calendar}
+                  modifiers={{
+                    available: availableDates
+                  }}
+                  modifiersClassNames={{
+                    available: styles.availableDate
+                  }}
+                />
+              </div>
+            )}
+          </div>
         </div>
 
         <div className={styles.formGroup}>

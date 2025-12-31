@@ -20,6 +20,7 @@
     ],
     "analogPerMinute": [
       {
+        
         "id": "A1",
         "name": "Drill Bit Temperature",
         "unit": "°C",

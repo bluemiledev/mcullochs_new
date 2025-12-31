@@ -15,6 +15,7 @@ import MaintenanceTables from '../components/MaintenanceTables';
 import styles from './VehicleDashboard.module.css';
 import { useTimeContext } from '../context/TimeContext';
 import { useDataProcessor } from '../hooks/useDataProcessor';
+import { formatShiftForAPI } from '../utils';
 
 interface VehicleMetric {
   id: string;
@@ -62,7 +63,9 @@ const VehicleDashboard: React.FC = () => {
   // Enable asset modal - hide it if URL params are present
   const [showAssetModal, setShowAssetModal] = useState<boolean>(!hasUrlParams);
   const [selectedVehicleId, setSelectedVehicleId] = useState<number | null>(initialVehicleId);
+  const [selectedVehicleSerialNo, setSelectedVehicleSerialNo] = useState<string | null>(initialVehicleParam || null);
   const [selectedDate, setSelectedDate] = useState<string>(initialDateParam || '');
+  const [selectedShift, setSelectedShift] = useState<string>('6 AM to 6 PM');
   const [visibleChartsCount, setVisibleChartsCount] = useState<number>(5); // Start with 5 charts, progressively render more
   const [processingProgress, setProcessingProgress] = useState<number>(0);
   const [vehicles, setVehicles] = useState<Array<{ id: number; name: string; rego: string }>>([]);
@@ -111,6 +114,7 @@ const VehicleDashboard: React.FC = () => {
       const vehicleId = Number(vehicleParam);
       if (vehicleId && dateParam) {
         setSelectedVehicleId(vehicleId);
+        setSelectedVehicleSerialNo(vehicleParam); // Store as string for API calls
         setSelectedDate(dateParam);
         setShowAssetModal(false);
         // Dispatch event so FilterControls can also initialize
@@ -128,12 +132,12 @@ const VehicleDashboard: React.FC = () => {
       }
     }
   }, [searchParams, selectedVehicleId, selectedDate]);
-
+  
   // Keep refs in sync with state
   useEffect(() => {
     vehicleMetricsRef.current = vehicleMetrics;
   }, [vehicleMetrics]);
-
+  
   useEffect(() => {
     digitalStatusChartRef.current = digitalStatusChart;
   }, [digitalStatusChart]);
@@ -342,7 +346,11 @@ useEffect(() => {
     setSelectionEnd(null);
     
     setSelectedVehicleId(vehicleId);
+    // Note: selectedVehicleSerialNo is set by the asset:selected event listener
+    // If not set yet, fallback to string conversion
+    setSelectedVehicleSerialNo(prev => prev || String(vehicleId));
     setSelectedDate(date);
+    setSelectedShift(shift); // Store shift
     setScreenMode(reportType); // Set screen mode from modal
     setShowAssetModal(false);
     
@@ -490,6 +498,30 @@ useEffect(() => {
     };
   }, [screenMode]);
 
+  // Listen to asset selection from modal
+  useEffect(() => {
+    const handleAssetSelected = (e: CustomEvent) => {
+      const deviceId = e?.detail?.device_id; // Can be string (devices_serial_no) or number
+      const date = e?.detail?.date;
+      const shift = e?.detail?.shift || '6 AM to 6 PM';
+      const reportType = e?.detail?.reportType || 'Maintenance';
+      
+      if (deviceId && date) {
+        // Convert to number for selectedVehicleId (backward compatibility)
+        const vehicleIdNum = typeof deviceId === 'string' ? Number(deviceId) : deviceId;
+        // Store devices_serial_no as string for API calls
+        const serialNo = typeof deviceId === 'string' ? deviceId : String(deviceId);
+        setSelectedVehicleSerialNo(serialNo);
+        // Note: handleShowGraph is called directly from modal, so we just store serialNo here
+      }
+    };
+    
+    window.addEventListener('asset:selected', handleAssetSelected as EventListener);
+    return () => {
+      window.removeEventListener('asset:selected', handleAssetSelected as EventListener);
+    };
+  }, []);
+
   // Listen to top-left controls events
   useEffect(() => {
     const onApply = (e: any) => {
@@ -497,12 +529,18 @@ useEffect(() => {
       if (showAssetModal) {
         return;
       }
-      const deviceId = Number(e?.detail?.device_id);
+      const deviceId = e?.detail?.device_id;
       const date = String(e?.detail?.date || '');
-      if (deviceId) setSelectedVehicleId(deviceId);
+      if (deviceId) {
+        const deviceIdNum = typeof deviceId === 'string' ? Number(deviceId) : deviceId;
+        const serialNo = typeof deviceId === 'string' ? deviceId : String(deviceId);
+        setSelectedVehicleId(deviceIdNum);
+        setSelectedVehicleSerialNo(serialNo);
+      }
       if (date) setSelectedDate(date);
       if (deviceId && date && !showAssetModal) {
-        handleShowGraph(deviceId, date, '6 AM to 6 PM', 'Maintenance');
+        const deviceIdNum = typeof deviceId === 'string' ? Number(deviceId) : deviceId;
+        handleShowGraph(deviceIdNum, date, '6 AM to 6 PM', 'Maintenance');
       }
     };
     const onOpen = () => setShowFilters(true);
@@ -566,29 +604,15 @@ useEffect(() => {
     };
   }, [handleShowGraph, showAssetModal]);
 
-  // Load maintenance tables data when in Maintenance mode
+  // Clear maintenance tables data when switching modes
   useEffect(() => {
-    if (screenMode === 'Maintenance' && !showAssetModal) {
-      const loadMaintenanceTables = async () => {
-        try {
-          const response = await fetch('/data/maintenance-tables-data.json');
-          if (response.ok) {
-            const data = await response.json();
-            setMaintenanceTablesData(data);
-            console.log('✅ Loaded maintenance tables data:', data);
-          } else {
-            console.error('❌ Failed to load maintenance tables data');
-          }
-        } catch (error) {
-          console.error('❌ Error loading maintenance tables data:', error);
-        }
-      };
-      loadMaintenanceTables();
-    } else if (screenMode === 'Drilling') {
+    if (screenMode === 'Drilling') {
       // Clear maintenance tables data when switching to Drilling mode
       setMaintenanceTablesData(null);
     }
-  }, [screenMode, showAssetModal]);
+    // Note: Maintenance tables data is now loaded from the main API call
+    // in the data loading useEffect, so we don't need a separate fetch here
+  }, [screenMode]);
 
   // Debug: Log visibleRigOpsRows when it changes
   useEffect(() => {
@@ -945,22 +969,64 @@ useEffect(() => {
         */
         
         // LOAD FROM API BASED ON SCREEN MODE (using proxy to avoid CORS)
-        const apiPath = screenMode === 'Drilling' 
-          ? '/reet_python/read_drilling_json_file.php'
-          : '/reet_python/read_maintenance_json.php';
-        console.log(`📂 Loading ${screenMode} data from API via proxy:`, apiPath);
-        const response = await fetch(apiPath, {
+        let apiUrl: string;
+        if (screenMode === 'Drilling') {
+          // Use new drilling API with parameters
+          const shiftParam = formatShiftForAPI(selectedShift);
+          // Use devices_serial_no (string) for API call
+          const serialNo = selectedVehicleSerialNo || String(selectedVehicleId);
+          apiUrl = `/reet_python/mccullochs/apis/get_drilling_json.php?devices_serial_no=${encodeURIComponent(serialNo)}&date=${encodeURIComponent(selectedDate)}&shift=${encodeURIComponent(shiftParam)}`;
+          console.log(`📂 Loading ${screenMode} data from API:`, apiUrl);
+        } else {
+          // Maintenance mode - use new maintenance API with parameters
+          const shiftParam = formatShiftForAPI(selectedShift);
+          // Use devices_serial_no (string) for API call
+          const serialNo = selectedVehicleSerialNo || String(selectedVehicleId);
+          apiUrl = `/reet_python/mccullochs/apis/get_maintenance_json.php?devices_serial_no=${encodeURIComponent(serialNo)}&date=${encodeURIComponent(selectedDate)}&shift=${encodeURIComponent(shiftParam)}`;
+          console.log(`📂 Loading ${screenMode} data from API:`, apiUrl);
+        }
+        
+        const response = await fetch(apiUrl, {
           headers: { 
             'Accept': 'application/json'
           },
-          cache: 'no-store'
+          cache: 'no-store',
+          mode: 'cors'
         });
         
         if (!response.ok) {
           throw new Error(`Failed to load data from API: ${response.status} ${response.statusText}`);
         }
         
-        const json = await response.json();
+        const responseText = await response.text();
+        let json: any;
+        
+        try {
+          json = JSON.parse(responseText);
+        } catch (parseError) {
+          console.error('❌ Failed to parse response as JSON:', parseError);
+          console.error('❌ Response text (first 1000 chars):', responseText.substring(0, 1000));
+          throw new Error('Invalid JSON response from API');
+        }
+        
+        // Handle API response structure: { success: true, data: {...} }
+        if (json.success && json.data) {
+          // Extract table data for maintenance mode
+          if (screenMode === 'Maintenance' && json.data.reportingOutputs) {
+            setMaintenanceTablesData({
+              reportingOutputs: json.data.reportingOutputs || {},
+              faultReportingAnalog: json.data.faultReportingAnalog || {},
+              faultReportingDigital: json.data.faultReportingDigital || {}
+            });
+            console.log('✅ Set maintenance tables data from API:', {
+              reportingOutputs: Object.keys(json.data.reportingOutputs || {}).length,
+              faultReportingAnalog: Object.keys(json.data.faultReportingAnalog || {}).length,
+              faultReportingDigital: Object.keys(json.data.faultReportingDigital || {}).length
+            });
+          }
+          json = json.data; // Extract data from response wrapper
+        }
+        
         console.log('✅ Loaded data from API');
         
         // Convert analogPerSecond to analogPerMinute format (aggregate 60 seconds into 1 minute)
@@ -1051,14 +1117,11 @@ useEffect(() => {
           return Array.from(minuteMap.values()).sort((a, b) => a.time.localeCompare(b.time));
         };
         
-        // Extract table data if available
-        if (json.tableData) {
-          setTableData(json.tableData);
-        }
-        
         // Use the JSON structure directly - we have proper data files
         console.log('✅ Loaded JSON data with', json.analogPerMinute?.length || 0, 'analog series');
         console.log('✅ First series has', json.analogPerMinute?.[0]?.points?.length || 0, 'data points');
+        console.log('✅ Timestamps count:', json.timestamps?.length || 0);
+        console.log('✅ Table data keys:', json.tableData ? Object.keys(json.tableData) : 'none');
         
         let payload: any = {
           timestamps: json.timestamps || [],
@@ -1069,7 +1132,20 @@ useEffect(() => {
         
         // Extract table data
         if (json.tableData) {
+          console.log('✅ Setting table data:', Object.keys(json.tableData));
           setTableData(json.tableData);
+        } else {
+          console.warn('⚠️ No tableData in API response');
+        }
+        
+        // Create a map of time strings to timestamps for efficient lookup
+        const timeToTimestampMap = new Map<string, number>();
+        if (payload.timestamps && Array.isArray(payload.timestamps)) {
+          payload.timestamps.forEach((ts: any) => {
+            if (ts.time && ts.timestamp) {
+              timeToTimestampMap.set(ts.time, ts.timestamp);
+            }
+          });
         }
         
         // Convert analogPerMinute to analogSignals format if needed
@@ -1087,19 +1163,25 @@ useEffect(() => {
             const times: number[] = [];
             
             (series.points || []).forEach((point: any) => {
-              // Parse time string to timestamp
-              // Use selectedDate for the timeline (6 AM to 6 PM)
-              const [hh, mm] = (point.time || '00:00:00').split(':').map(Number);
-              const baseDate = new Date(selectedDate);
-              baseDate.setHours(hh, mm, 0, 0);
-              times.push(baseDate.getTime());
+              // Use timestamp from map if available, otherwise parse time string
+              let timestamp: number;
+              if (point.time && timeToTimestampMap.has(point.time)) {
+                timestamp = timeToTimestampMap.get(point.time)!;
+              } else {
+                // Fallback: parse time string
+                const [hh, mm] = (point.time || '00:00:00').split(':').map(Number);
+                const baseDate = new Date(selectedDate);
+                baseDate.setHours(hh, mm, 0, 0);
+                timestamp = baseDate.getTime();
+              }
+              times.push(timestamp);
               
               values.push(point.avg != null ? point.avg : null);
               mins.push(point.min != null ? point.min : null);
               maxs.push(point.max != null ? point.max : null);
             });
             
-            // Preserve all series properties including min_color and max_color
+            // Preserve all series properties including min_color, max_color, and yAxisRange
             const converted = {
               ...series,
               values,
@@ -1109,8 +1191,25 @@ useEffect(() => {
               // Explicitly preserve color properties from API
               color: series.color,
               min_color: series.min_color,
-              max_color: series.max_color
+              max_color: series.max_color,
+              // Preserve yAxisRange if present
+              yAxisRange: series.yAxisRange || { min: 0, max: 100 },
+              // Preserve unit
+              unit: series.unit || ''
             };
+            
+            console.log(`📊 Converted series ${series.id || series.name}:`, {
+              pointsCount: series.points?.length || 0,
+              valuesCount: values.length,
+              timesCount: times.length,
+              yAxisRange: converted.yAxisRange,
+              unit: converted.unit,
+              color: converted.color,
+              firstValue: values[0],
+              firstTime: times[0] ? new Date(times[0]).toISOString() : 'N/A',
+              sampleValues: values.slice(0, 3),
+              sampleTimes: times.slice(0, 3).map(t => new Date(t).toISOString())
+            });
             
             // Debug: Log color extraction
             if (series.min_color || series.max_color) {
