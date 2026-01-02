@@ -653,7 +653,7 @@ if (typeof window !== 'undefined') {
 
 const FilterControls: React.FC = () => {
   type Vehicle = { id: string; name: string; rego: string };
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [selectedVehicleId, setSelectedVehicleId] = useState<string>('');
   const [dates, setDates] = useState<string[]>([]);
@@ -729,29 +729,22 @@ const FilterControls: React.FC = () => {
     };
   }, [selectedVehicleId, selectedDate]);
 
-  // COMMENTED OUT API CALLS - Using static values
-  // Static vehicle and date
-  const staticVehicle = { id: '6361819', name: 'Rego 6361819 - MEAQ026', rego: '6361819' };
-  const staticDate = '2025-10-21';
-  
-  // Initialize with static values
-  useEffect(() => {
-    if (!selectedVehicleId) {
-      setSelectedVehicleId(staticVehicle.id);
-    }
-    if (!selectedDate) {
-      setSelectedDate(staticDate);
-    }
-  }, []);
-  
-  /*
-  // Load vehicles from API with local fallback
+  const [selectedShift, setSelectedShift] = useState<string>('6 AM to 6 PM');
+  const [loadingVehicles, setLoadingVehicles] = useState<boolean>(false);
+  const [loadingDates, setLoadingDates] = useState<boolean>(false);
+
+  // Load vehicles from API
   useEffect(() => {
     let aborted = false;
     const load = async () => {
       try {
+        setLoadingVehicles(true);
         // Fetch from reet_python vehicles API (via proxy)
-        const apiRes = await fetch('/reet_python/get_vehicles.php', { headers: { 'Accept': 'application/json' }, cache: 'no-store', mode: 'cors' });
+        const apiRes = await fetch('/reet_python/mccullochs/apis/get_vehicles.php', { 
+          headers: { 'Accept': 'application/json' }, 
+          cache: 'no-store', 
+          mode: 'cors' 
+        });
         if (!apiRes.ok) {
           const errorText = await apiRes.text().catch(() => 'Unable to read error response');
           console.error('❌ FilterControls Vehicles API Error:', errorText.substring(0, 500));
@@ -760,20 +753,16 @@ const FilterControls: React.FC = () => {
         
         // Get response as text first to check if it's actually JSON
         const text = await apiRes.text();
-        const contentType = apiRes.headers.get('content-type');
-        
-        // Check if response is actually JSON (even if Content-Type is wrong)
         let json: any;
         try {
           json = JSON.parse(text);
-          console.log('✅ FilterControls: Successfully parsed vehicles JSON (Content-Type was:', contentType, ')');
+          console.log('✅ FilterControls: Successfully parsed vehicles JSON');
         } catch (parseError) {
           if (text.includes('<!doctype') || text.includes('<html')) {
-            console.error('❌ FilterControls: Vehicles API returned HTML. Content-Type:', contentType);
-            console.error('❌ Response body (first 500 chars):', text.substring(0, 500));
+            console.error('❌ FilterControls: Vehicles API returned HTML');
             throw new Error(`API returned HTML instead of JSON`);
           } else {
-            console.error('❌ FilterControls: Vehicles API invalid JSON. Content-Type:', contentType);
+            console.error('❌ FilterControls: Vehicles API invalid JSON');
             throw new Error(`API returned invalid JSON`);
           }
         }
@@ -788,28 +777,43 @@ const FilterControls: React.FC = () => {
           : [];
         if (aborted) return;
         setVehicles(arr);
-        // Don't auto-select - user must select from AssetSelectionModal first
-      } catch {
-        // Minimal hardcoded fallback if API fails
-        const fallback: Vehicle[] = [];
+        // Auto-select first vehicle if none selected and we have vehicles
+        if (!selectedVehicleId && arr.length > 0) {
+          setSelectedVehicleId(arr[0].id);
+        }
+      } catch (err) {
+        console.error('❌ FilterControls: Error loading vehicles:', err);
         if (!aborted) {
-          setVehicles(fallback);
+          setVehicles([]);
+        }
+      } finally {
+        if (!aborted) {
+          setLoadingVehicles(false);
         }
       }
     };
     load();
     return () => { aborted = true; };
-  }, [selectedVehicleId]);
+  }, []);
 
-  // Fetch dates when vehicle changes and auto-select the first (most recent) date
+  // Fetch dates when vehicle changes
   useEffect(() => {
     let aborted = false;
     const loadDates = async () => {
-      if (!selectedVehicleId) { setDates([]); setSelectedDate(''); return; }
+      if (!selectedVehicleId) { 
+        setDates([]); 
+        setSelectedDate(''); 
+        return; 
+      }
       try {
+        setLoadingDates(true);
         // Fetch from reet_python dates API using devices_serial_no (via proxy)
-        const url = `/reet_python/get_vehicle_dates.php?devices_serial_no=${selectedVehicleId}`;
-        const res = await fetch(url, { headers: { 'Accept': 'application/json' }, cache: 'no-store', mode: 'cors' });
+        const url = `/reet_python/mccullochs/apis/get_vehicle_dates.php?devices_serial_no=${encodeURIComponent(selectedVehicleId)}`;
+        const res = await fetch(url, { 
+          headers: { 'Accept': 'application/json' }, 
+          cache: 'no-store', 
+          mode: 'cors' 
+        });
         if (!res.ok) {
           const errorText = await res.text().catch(() => 'Unable to read error response');
           console.error('❌ FilterControls Dates API Error:', errorText.substring(0, 500));
@@ -818,52 +822,50 @@ const FilterControls: React.FC = () => {
         
         // Get response as text first to check if it's actually JSON
         const text = await res.text();
-        const contentType = res.headers.get('content-type');
-        
-        // Check if response is actually JSON (even if Content-Type is wrong)
         let json: any;
         try {
           json = JSON.parse(text);
-          console.log('✅ FilterControls: Successfully parsed dates JSON (Content-Type was:', contentType, ')');
+          console.log('✅ FilterControls: Successfully parsed dates JSON');
         } catch (parseError) {
           if (text.includes('<!doctype') || text.includes('<html')) {
-            console.error('❌ FilterControls: Dates API returned HTML. Content-Type:', contentType);
-            console.error('❌ Response body (first 500 chars):', text.substring(0, 500));
+            console.error('❌ FilterControls: Dates API returned HTML');
             throw new Error(`API returned HTML instead of JSON`);
           } else {
-            console.error('❌ FilterControls: Dates API invalid JSON. Content-Type:', contentType);
+            console.error('❌ FilterControls: Dates API invalid JSON');
             throw new Error(`API returned invalid JSON`);
           }
         }
         // Map response: [{ date: "YYYY-MM-DD" }, ...]
-        let arr: string[] = Array.isArray(json) ? json.map((o: any) => String(o?.date || '')) : [];
-        arr = arr.filter((d: string) => d.length > 0);
+        const arr: string[] = Array.isArray(json) 
+          ? json.map((o: any) => String(o?.date || '')).filter((d: string) => d.length > 0)
+          : [];
         arr.sort((a, b) => b.localeCompare(a)); // Sort descending (most recent first)
         if (aborted) return;
         setDates(arr);
-        // Auto-select the first (most recent) date if available
-        // Only auto-select if no date is currently selected, or if the current date is not in the list
-        if (arr.length > 0) {
-          // Use functional update to check current selectedDate without causing dependency issues
-          setSelectedDate((currentDate) => {
-            // If date is already set (e.g., from URL params), keep it if it's in the list
-            if (currentDate && arr.includes(currentDate)) {
-              console.log('📅 FilterControls: Keeping existing date from URL/selection:', currentDate);
-              return currentDate;
-            }
-            // If no date is selected, or current date is not in the available dates list, auto-select most recent
-            console.log('📅 FilterControls: Auto-selected most recent date:', arr[0]);
-            return arr[0];
-          });
+        // Auto-select the first (most recent) date if available and no date is selected
+        if (arr.length > 0 && !selectedDate) {
+          setSelectedDate(arr[0]);
+        } else if (arr.length > 0 && selectedDate && !arr.includes(selectedDate)) {
+          // If current date is not in the list, select the most recent
+          setSelectedDate(arr[0]);
         }
       } catch (e) {
-        if (!aborted) { setDates([]); setSelectedDate(''); }
+        console.error('❌ FilterControls: Error loading dates:', e);
+        if (!aborted) { 
+          setDates([]); 
+          if (!selectedDate) {
+            setSelectedDate(''); 
+          }
+        }
+      } finally {
+        if (!aborted) {
+          setLoadingDates(false);
+        }
       }
     };
     loadDates();
     return () => { aborted = true; };
   }, [selectedVehicleId]);
-  */
 
   // Listen to screen mode changes from AssetSelectionModal
   useEffect(() => {
@@ -891,18 +893,39 @@ const FilterControls: React.FC = () => {
     }));
   };
   
-  // Dispatch event when vehicle or date changes to trigger chart reload
+  // Dispatch event when vehicle, date, shift, or screen mode changes to trigger chart reload
   useEffect(() => {
     if (selectedVehicleId && selectedDate) {
+      // Update URL parameters
+      const params = new URLSearchParams(searchParams);
+      params.set('device_id', selectedVehicleId);
+      params.set('date', selectedDate);
+      setSearchParams(params, { replace: true });
+      
       // Dispatch filters:apply event to notify VehicleDashboard to reload charts
       window.dispatchEvent(new CustomEvent('filters:apply', {
         detail: {
           device_id: Number(selectedVehicleId),
-          date: selectedDate
+          date: selectedDate,
+          shift: selectedShift,
+          reportType: screenMode
         }
       }));
+      // Also dispatch asset:selected event for consistency
+      window.dispatchEvent(new CustomEvent('asset:selected', {
+        detail: {
+          device_id: selectedVehicleId,
+          date: selectedDate,
+          shift: selectedShift,
+          reportType: screenMode
+        }
+      }));
+      // Dispatch screen mode change if it changed
+      window.dispatchEvent(new CustomEvent('screen-mode:changed', {
+        detail: { mode: screenMode }
+      }));
     }
-  }, [selectedVehicleId, selectedDate]);
+  }, [selectedVehicleId, selectedDate, selectedShift, screenMode, searchParams, setSearchParams]);
 
   // Close calendar when clicking outside
   useEffect(() => {
@@ -962,31 +985,36 @@ const FilterControls: React.FC = () => {
           
           <select 
             className={styles.select}
-            value={selectedVehicleId || staticVehicle.id}
+            value={selectedVehicleId}
             onChange={(e) => {
               setSelectedVehicleId(e.target.value);
             }}
-            disabled
+            disabled={loadingVehicles}
           >
-            <option value={staticVehicle.id}>{staticVehicle.name}</option>
+            {loadingVehicles ? (
+              <option value="">Loading vehicles...</option>
+            ) : vehicles.length === 0 ? (
+              <option value="">No vehicles available</option>
+            ) : (
+              <>
+                <option value="">-- Select Asset --</option>
+                {vehicles.map((vehicle) => (
+                  <option key={vehicle.id} value={vehicle.id}>
+                    {vehicle.name}
+                  </option>
+                ))}
+              </>
+            )}
           </select>
           
-          <input
-            type="text"
-            className={styles.select}
-            value={formatDateForDisplay(selectedDate || staticDate)}
-            readOnly
-            disabled
-          />
-          {/* COMMENTED OUT - Using static date
           <div className={styles.datePickerWrapper} ref={calendarRef}>
             <button
               type="button"
               className={styles.datePickerButton}
               onClick={() => setShowCalendar(!showCalendar)}
-              disabled={!selectedVehicleId || dates.length === 0}
+              disabled={!selectedVehicleId || loadingDates || dates.length === 0}
             >
-              {selectedDate ? formatDateForDisplay(selectedDate) : 'Select Date'}
+              {loadingDates ? 'Loading dates...' : selectedDate ? formatDateForDisplay(selectedDate) : 'Select Date'}
             </button>
             {showCalendar && selectedVehicleId && dates.length > 0 && (
               <div className={styles.calendarDropdown}>
@@ -1006,7 +1034,6 @@ const FilterControls: React.FC = () => {
               </div>
             )}
           </div>
-          */}
           
           <select 
             className={styles.select}
@@ -1019,7 +1046,8 @@ const FilterControls: React.FC = () => {
           
           <select 
             className={styles.select}
-            defaultValue="6 AM to 6 PM"
+            value={selectedShift}
+            onChange={(e) => setSelectedShift(e.target.value)}
           >
             <option value="6 AM to 6 PM">6 AM to 6 PM</option>
             <option value="6 PM to 6 AM">6 PM to 6 AM</option>

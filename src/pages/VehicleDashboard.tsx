@@ -88,6 +88,7 @@ const VehicleDashboard: React.FC = () => {
     faultReportingAnalog?: Record<string, { value: number; max: number; unit: string }>;
     faultReportingDigital?: Record<string, { value: number; max: number; unit: string }>;
   } | null>(null);
+  const [rawTimestamps, setRawTimestamps] = useState<number[]>([]); // Store raw timestamps from API for scrubber
   const { processData, getWindow, clearCache } = useDataProcessor();
 
   const [errorModal, setErrorModal] = useState<{
@@ -531,6 +532,9 @@ useEffect(() => {
       }
       const deviceId = e?.detail?.device_id;
       const date = String(e?.detail?.date || '');
+      const shift = e?.detail?.shift || '6 AM to 6 PM';
+      const reportType = e?.detail?.reportType || 'Maintenance';
+      
       if (deviceId) {
         const deviceIdNum = typeof deviceId === 'string' ? Number(deviceId) : deviceId;
         const serialNo = typeof deviceId === 'string' ? deviceId : String(deviceId);
@@ -538,9 +542,13 @@ useEffect(() => {
         setSelectedVehicleSerialNo(serialNo);
       }
       if (date) setSelectedDate(date);
+      if (shift) setSelectedShift(shift);
+      if (reportType === 'Maintenance' || reportType === 'Drilling') {
+        setScreenMode(reportType);
+      }
       if (deviceId && date && !showAssetModal) {
         const deviceIdNum = typeof deviceId === 'string' ? Number(deviceId) : deviceId;
-        handleShowGraph(deviceIdNum, date, '6 AM to 6 PM', 'Maintenance');
+        handleShowGraph(deviceIdNum, date, shift, reportType);
       }
     };
     const onOpen = () => setShowFilters(true);
@@ -864,6 +872,7 @@ useEffect(() => {
       try {
         setLoading(true);
         setProcessingProgress(0);
+        setRawTimestamps([]); // Clear previous timestamps
         
         // COMMENTED OUT API CALL - Using dummy JSON file instead
         /*
@@ -1136,6 +1145,58 @@ useEffect(() => {
           setTableData(json.tableData);
         } else {
           console.warn('⚠️ No tableData in API response');
+        }
+        
+        // Extract and process timestamps for scrubber
+        // API can return timestamps as: array of numbers (Unix timestamps) or array of objects
+        let processedTimestamps: number[] = [];
+        if (payload.timestamps && Array.isArray(payload.timestamps)) {
+          if (payload.timestamps.length > 0) {
+            // Check if first element is a number (Unix timestamp) or an object
+            const firstItem = payload.timestamps[0];
+            if (typeof firstItem === 'number') {
+              // Array of Unix timestamps (could be seconds or milliseconds)
+              // Timestamps in seconds for years 2000-2100 are typically < 4,102,444,800 (year 2100 in seconds)
+              // Timestamps in milliseconds for years 2000-2100 are typically > 946,684,800,000 (year 2000 in milliseconds)
+              // Use 10 billion as threshold (year 2286 in seconds, year 2001 in milliseconds)
+              processedTimestamps = payload.timestamps.map((ts: number) => {
+                // If timestamp is less than 10 billion, assume it's in seconds
+                if (ts < 10000000000) {
+                  return ts * 1000; // Convert seconds to milliseconds
+                }
+                return ts; // Already in milliseconds
+              });
+            } else if (typeof firstItem === 'object' && firstItem !== null) {
+              // Array of objects with timestamp property
+              processedTimestamps = payload.timestamps
+                .map((ts: any) => {
+                  // Try different possible property names
+                  const timestamp = ts.timestamp || ts.time || ts.ts;
+                  if (typeof timestamp === 'number') {
+                    // If timestamp is less than 10 billion, assume it's in seconds
+                    if (timestamp < 10000000000) {
+                      return timestamp * 1000; // Convert seconds to milliseconds
+                    }
+                    return timestamp; // Already in milliseconds
+                  } else if (typeof timestamp === 'string') {
+                    // Parse ISO string or other date format
+                    const parsed = new Date(timestamp).getTime();
+                    return isNaN(parsed) ? null : parsed;
+                  }
+                  return null;
+                })
+                .filter((ts: number | null): ts is number => ts !== null && Number.isFinite(ts));
+            }
+          }
+        }
+        
+        // Sort timestamps and remove duplicates
+        processedTimestamps = Array.from(new Set(processedTimestamps)).sort((a, b) => a - b);
+        setRawTimestamps(processedTimestamps);
+        console.log('✅ Extracted timestamps for scrubber:', processedTimestamps.length, 'points');
+        if (processedTimestamps.length > 0) {
+          console.log('✅ First timestamp:', new Date(processedTimestamps[0]).toISOString());
+          console.log('✅ Last timestamp:', new Date(processedTimestamps[processedTimestamps.length - 1]).toISOString());
         }
         
         // Create a map of time strings to timestamps for efficient lookup
@@ -2473,13 +2534,16 @@ useEffect(() => {
   }, [selectedVehicleId, selectedDate, showAssetModal, selectedHourRange, screenMode]); // Reload when vehicle/date/hour range/screen mode changes
 
 
-  // Prepare scrubber data - per-second in second view mode, per-minute otherwise
+  // Prepare scrubber data - use raw timestamps from API if available, otherwise fallback to generated data
   const scrubberData = useMemo(() => {
-    // In second view mode, use full timeline timestamps (not windowed)
-    // Always use minute-based timestamps (second view mode removed)
+    // Priority 1: Use raw timestamps from API (most accurate)
+    if (rawTimestamps.length > 0) {
+      const data: Array<{ time: number }> = rawTimestamps.map(ts => ({ time: ts }));
+      console.log('✅ Using raw timestamps for scrubber:', data.length, 'points');
+      return data;
+    }
     
-    // Default: per-minute resolution
-    // Prefer explicit selection range when available
+    // Priority 2: Fallback to data from charts
     const candidateStarts: number[] = [];
     const candidateEnds: number[] = [];
 
@@ -2508,14 +2572,16 @@ useEffect(() => {
     const endTs = Math.max(...candidateEnds);
     if (!Number.isFinite(startTs) || !Number.isFinite(endTs) || startTs >= endTs) return [];
 
+    // Generate minute-by-minute data as fallback
     const data: Array<{ time: number }> = [];
     const step = 60 * 1000; // 1 minute resolution
     for (let t = startTs; t <= endTs; t += step) {
       data.push({ time: t });
     }
     if (data.length === 0 || data[data.length - 1].time !== endTs) data.push({ time: endTs });
+    console.log('⚠️ Using generated timestamps for scrubber (fallback):', data.length, 'points');
     return data;
-  }, [vehicleMetrics, digitalStatusChart, selectionStart, selectionEnd, selectedHourRange, selectedDate]);
+  }, [rawTimestamps, vehicleMetrics, digitalStatusChart, selectionStart, selectionEnd, selectedHourRange, selectedDate]);
 
   // Calculate synchronized time domain from selection range
   const timeDomain = useMemo<[number, number] | null>(() => {
