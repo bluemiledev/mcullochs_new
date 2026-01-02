@@ -60,8 +60,8 @@ const VehicleDashboard: React.FC = () => {
   const [selectionEnd, setSelectionEnd] = useState<Date | null>(null);
   const [crosshairActive, setCrosshairActive] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(false);
-  // Enable asset modal - hide it if URL params are present
-  const [showAssetModal, setShowAssetModal] = useState<boolean>(!hasUrlParams);
+  // Always show asset modal on page load/refresh
+  const [showAssetModal, setShowAssetModal] = useState<boolean>(true);
   const [selectedVehicleId, setSelectedVehicleId] = useState<number | null>(initialVehicleId);
   const [selectedVehicleSerialNo, setSelectedVehicleSerialNo] = useState<string | null>(initialVehicleParam || null);
   const [selectedDate, setSelectedDate] = useState<string>(initialDateParam || '');
@@ -108,9 +108,12 @@ const VehicleDashboard: React.FC = () => {
   const digitalStatusChartRef = useRef<DigitalStatusChart | null>(null);
   
   // Update state when URL params change (e.g., when navigating back)
+  // But always show Asset Chart modal on page refresh - don't auto-hide
   useEffect(() => {
     const vehicleParam = searchParams.get('device_id') || searchParams.get('vehicle');
     const dateParam = searchParams.get('date');
+    const shiftParam = searchParams.get('shift');
+    const reportTypeParam = searchParams.get('reportType');
     
     if (vehicleParam && dateParam) {
       const vehicleId = Number(vehicleParam);
@@ -118,22 +121,15 @@ const VehicleDashboard: React.FC = () => {
         setSelectedVehicleId(vehicleId);
         setSelectedVehicleSerialNo(vehicleParam); // Store as string for API calls
         setSelectedDate(dateParam);
-        setShowAssetModal(false);
-        // Dispatch event so FilterControls can also initialize
-        window.dispatchEvent(new CustomEvent('filters:apply', {
-          detail: {
-            device_id: vehicleId,
-            date: dateParam
-          }
-        }));
-      }
-    } else if (!vehicleParam && !dateParam) {
-      // If no params, show modal (but only if we don't already have values set)
-      if (!selectedVehicleId || !selectedDate) {
-        setShowAssetModal(true);
+        if (shiftParam) setSelectedShift(shiftParam);
+        if (reportTypeParam === 'Maintenance' || reportTypeParam === 'Drilling') setScreenMode(reportTypeParam);
+        // Don't auto-hide modal - always show Asset Chart modal on page refresh
+        // User must click "Show Graph" to proceed
+        // setShowAssetModal(false);
       }
     }
-  }, [searchParams, selectedVehicleId, selectedDate]);
+    // Always show modal on page refresh - removed the else clause that would hide it
+  }, [searchParams]);
   
   // Keep refs in sync with state
   useEffect(() => {
