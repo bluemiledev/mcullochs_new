@@ -2,6 +2,7 @@ import React, { useMemo, useCallback, useRef, useState, useEffect } from 'react'
 
 import {
   AreaChart,
+  Area,
   XAxis,
   YAxis,
   ReferenceLine,
@@ -46,15 +47,42 @@ const TimeScrubber: React.FC<TimeScrubberProps> = ({
   }, [data]);
 
   const timeDomain = useMemo(() => {
-    if (data.length === 0) return [0, 0] as [number, number];
-    return [data[0].time, data[data.length - 1].time] as [number, number];
+    if (data.length === 0) {
+      console.warn('⚠️ TimeScrubber: No data provided, using default time domain');
+      // Return a default time domain (6 AM to 6 PM today) if no data
+      const now = new Date();
+      const start = new Date(now);
+      start.setHours(6, 0, 0, 0);
+      const end = new Date(now);
+      end.setHours(18, 0, 0, 0);
+      return [start.getTime(), end.getTime()] as [number, number];
+    }
+    const domain: [number, number] = [data[0].time, data[data.length - 1].time];
+    // Ensure valid domain
+    if (!Number.isFinite(domain[0]) || !Number.isFinite(domain[1]) || domain[0] >= domain[1]) {
+      console.warn('⚠️ TimeScrubber: Invalid time domain, using default');
+      const now = new Date();
+      const start = new Date(now);
+      start.setHours(6, 0, 0, 0);
+      const end = new Date(now);
+      end.setHours(18, 0, 0, 0);
+      return [start.getTime(), end.getTime()] as [number, number];
+    }
+    return domain;
   }, [data]);
 
   const formatTime = (tick: number) => {
+    // Format time in UTC
+    const date = new Date(tick);
     if (isSecondViewMode) {
-      return format(new Date(tick), 'HH:mm:ss');
+      const hours = String(date.getUTCHours()).padStart(2, '0');
+      const minutes = String(date.getUTCMinutes()).padStart(2, '0');
+      const seconds = String(date.getUTCSeconds()).padStart(2, '0');
+      return `${hours}:${minutes}:${seconds}`;
     }
-    return format(new Date(tick), 'HH:mm');
+    const hours = String(date.getUTCHours()).padStart(2, '0');
+    const minutes = String(date.getUTCMinutes()).padStart(2, '0');
+    return `${hours}:${minutes}`;
   };
 
   const [dragMode, setDragMode] = useState<null | 'left' | 'right' | 'range'>(null);
@@ -191,11 +219,21 @@ const TimeScrubber: React.FC<TimeScrubberProps> = ({
   useEffect(() => {
     const update = () => {
       const rect = overlayRef.current?.getBoundingClientRect();
-      setOverlayWidth(rect?.width || 0);
+      if (rect) {
+        setOverlayWidth(rect.width);
+      }
     };
+    // Initial update
     update();
+    // Use requestAnimationFrame to ensure DOM is ready
+    requestAnimationFrame(update);
+    // Also update after a short delay to catch any layout changes
+    const timeoutId = setTimeout(update, 100);
     window.addEventListener('resize', update);
-    return () => window.removeEventListener('resize', update);
+    return () => {
+      clearTimeout(timeoutId);
+      window.removeEventListener('resize', update);
+    };
   }, []);
 
   const percentForSelected = useMemo(() => {
@@ -205,20 +243,34 @@ const TimeScrubber: React.FC<TimeScrubberProps> = ({
   }, [selectedTime, timeDomain]);
 
   const selectedLeftPx = useMemo(() => {
-    if (percentForSelected === null) return null;
+    if (percentForSelected === null || overlayWidth === 0) return null;
     const inner = Math.max(1, overlayWidth - CHART_LEFT_OFFSET - RIGHT_MARGIN);
     return CHART_LEFT_OFFSET + inner * percentForSelected;
   }, [percentForSelected, overlayWidth]);
 
   const positionForTime = useCallback((t: number | null) => {
-    if (t === null || !timeDomain) return null;
+    if (t === null || !timeDomain || timeDomain[0] === timeDomain[1]) return null;
     const inner = Math.max(1, overlayWidth - CHART_LEFT_OFFSET - RIGHT_MARGIN);
     const p = (t - timeDomain[0]) / (timeDomain[1] - timeDomain[0]);
-    return CHART_LEFT_OFFSET + inner * Math.max(0, Math.min(1, p));
+    const position = CHART_LEFT_OFFSET + inner * Math.max(0, Math.min(1, p));
+    return position;
   }, [overlayWidth, timeDomain]);
 
-  const leftHandlePx = useMemo(() => positionForTime(selectionStart), [positionForTime, selectionStart]);
-  const rightHandlePx = useMemo(() => positionForTime(selectionEnd), [positionForTime, selectionEnd]);
+  const leftHandlePx = useMemo(() => {
+    if (selectionStart === null) {
+      return null;
+    }
+    const pos = positionForTime(selectionStart);
+    return pos;
+  }, [positionForTime, selectionStart]);
+  
+  const rightHandlePx = useMemo(() => {
+    if (selectionEnd === null) {
+      return null;
+    }
+    const pos = positionForTime(selectionEnd);
+    return pos;
+  }, [positionForTime, selectionEnd]);
 
   // Dynamic ticks based on data range: 30 minutes for 12 hours, 1 hour for 24 hours
   // In second view mode, use smaller intervals (every 5 minutes)
@@ -320,12 +372,16 @@ const TimeScrubber: React.FC<TimeScrubberProps> = ({
 
   const onLeftHandleMouseDown = (e: React.MouseEvent) => {
     e.preventDefault();
-    const startX = e.clientX;
-    const startStart = selectionStart ?? timeDomain[0];
+    e.stopPropagation();
+    if (selectionStart === null || selectionEnd === null) return;
+    
+    const startStart = selectionStart;
     let rafId: number | null = null;
     let lastStart = startStart;
+    
     const onMove = (ev: MouseEvent) => {
       ev.preventDefault();
+      ev.stopPropagation();
       // Throttle using requestAnimationFrame
       if (rafId !== null) return;
       rafId = requestAnimationFrame(() => {
@@ -333,15 +389,22 @@ const TimeScrubber: React.FC<TimeScrubberProps> = ({
         let newStart = timeFromClientX(ev.clientX);
         const end = selectionEnd ?? timeDomain[1];
         // Enforce minimum range (10 minutes in second view, 1 hour in minute view)
-        if (end - newStart < MIN_RANGE) newStart = end - MIN_RANGE;
+        if (end - newStart < MIN_RANGE) {
+          newStart = end - MIN_RANGE;
+        }
+        // Ensure newStart doesn't go before timeDomain start
+        if (newStart < timeDomain[0]) {
+          newStart = timeDomain[0];
+        }
         newStart = clampToDay(newStart);
-        // Only update if position changed significantly
-        if (Math.abs(newStart - lastStart) > 100) {
+        // Update on every significant change (reduced threshold for smoother dragging)
+        if (Math.abs(newStart - lastStart) > 50) {
           lastStart = newStart;
           onSelectionChange(newStart, end);
         }
       });
     };
+    
     const onUp = () => {
       if (rafId !== null) {
         cancelAnimationFrame(rafId);
@@ -350,31 +413,45 @@ const TimeScrubber: React.FC<TimeScrubberProps> = ({
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
     };
+    
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
   };
 
   const onRightHandleMouseDown = (e: React.MouseEvent) => {
     e.preventDefault();
-    const start = selectionStart ?? timeDomain[0];
+    e.stopPropagation();
+    if (selectionStart === null || selectionEnd === null) return;
+    
+    const start = selectionStart;
     let rafId: number | null = null;
-    let lastEnd = selectionEnd ?? timeDomain[1];
+    let lastEnd = selectionEnd;
+    
     const onMove = (ev: MouseEvent) => {
       ev.preventDefault();
+      ev.stopPropagation();
       // Throttle using requestAnimationFrame
       if (rafId !== null) return;
       rafId = requestAnimationFrame(() => {
         rafId = null;
         let newEnd = timeFromClientX(ev.clientX);
-        if (newEnd - start < MIN_RANGE) newEnd = start + MIN_RANGE;
+        // Enforce minimum range
+        if (newEnd - start < MIN_RANGE) {
+          newEnd = start + MIN_RANGE;
+        }
+        // Ensure newEnd doesn't go beyond timeDomain end
+        if (newEnd > timeDomain[1]) {
+          newEnd = timeDomain[1];
+        }
         newEnd = clampToDay(newEnd);
-        // Only update if position changed significantly
-        if (Math.abs(newEnd - lastEnd) > 100) {
+        // Update on every significant change (reduced threshold for smoother dragging)
+        if (Math.abs(newEnd - lastEnd) > 50) {
           lastEnd = newEnd;
           onSelectionChange(start, newEnd);
         }
       });
     };
+    
     const onUp = () => {
       if (rafId !== null) {
         cancelAnimationFrame(rafId);
@@ -383,6 +460,7 @@ const TimeScrubber: React.FC<TimeScrubberProps> = ({
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
     };
+    
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
   };
@@ -394,9 +472,25 @@ const TimeScrubber: React.FC<TimeScrubberProps> = ({
         <div className={styles.scrubberInfo}>
           {selectionStart && selectionEnd && (
             <>
-              <span>{format(new Date(selectionStart), 'HH:mm:ss')}</span>
+              <span>
+                {(() => {
+                  const date = new Date(selectionStart);
+                  const hours = String(date.getUTCHours()).padStart(2, '0');
+                  const minutes = String(date.getUTCMinutes()).padStart(2, '0');
+                  const seconds = String(date.getUTCSeconds()).padStart(2, '0');
+                  return `${hours}:${minutes}:${seconds}`;
+                })()}
+              </span>
               <span> → </span>
-              <span>{format(new Date(selectionEnd), 'HH:mm:ss')}</span>
+              <span>
+                {(() => {
+                  const date = new Date(selectionEnd);
+                  const hours = String(date.getUTCHours()).padStart(2, '0');
+                  const minutes = String(date.getUTCMinutes()).padStart(2, '0');
+                  const seconds = String(date.getUTCSeconds()).padStart(2, '0');
+                  return `${hours}:${minutes}:${seconds}`;
+                })()}
+              </span>
             </>
           )}
         </div>
@@ -423,7 +517,15 @@ const TimeScrubber: React.FC<TimeScrubberProps> = ({
               tick={{ fill: '#6b7280', fontSize: 9 }}
               style={{ fontSize: '9px' }}
             />
-            {/* Tooltip removed */}
+            {/* Area component is required for mouse events to work */}
+            <Area
+              type="linear"
+              dataKey="value"
+              stroke="none"
+              fill="#e5e7eb"
+              fillOpacity={0.3}
+              isAnimationActive={false}
+            />
             {/* Keep vehicle pointer line (selected time) */}
             {selectedTime !== null && (
               <ReferenceLine
@@ -446,18 +548,44 @@ const TimeScrubber: React.FC<TimeScrubberProps> = ({
               <div className={styles.vehiclePointerIcon} />
             </div>
           )}
-          {leftHandlePx !== null && (
+          {(() => {
+            console.log('🔍 TimeScrubber render - leftHandlePx:', leftHandlePx, 'selectionStart:', selectionStart, 'rightHandlePx:', rightHandlePx, 'selectionEnd:', selectionEnd, 'overlayWidth:', overlayWidth, 'timeDomain:', timeDomain);
+            return null;
+          })()}
+          {(() => {
+            if (leftHandlePx !== null || rightHandlePx !== null) {
+              console.log('🔍 TimeScrubber handles:', {
+                leftHandlePx,
+                rightHandlePx,
+                selectionStart,
+                selectionEnd,
+                overlayWidth,
+                timeDomain,
+                dataLength: data.length
+              });
+            }
+            return null;
+          })()}
+          {leftHandlePx !== null && selectionStart !== null && (
             <div
               className={styles.rangeHandle}
-              style={{ left: `${leftHandlePx}px` }}
+              style={{ 
+                left: `${leftHandlePx}px`,
+                zIndex: 20,
+                pointerEvents: 'auto'
+              }}
               onMouseDown={onLeftHandleMouseDown}
               title="Drag left handle"
             />
           )}
-          {rightHandlePx !== null && (
+          {rightHandlePx !== null && selectionEnd !== null && (
             <div
               className={styles.rangeHandle}
-              style={{ left: `${rightHandlePx}px` }}
+              style={{ 
+                left: `${rightHandlePx}px`,
+                zIndex: 20,
+                pointerEvents: 'auto'
+              }}
               onMouseDown={onRightHandleMouseDown}
               title="Drag right handle"
             />

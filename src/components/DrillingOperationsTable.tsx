@@ -91,11 +91,22 @@ const DrillingOperationsTable: React.FC<DrillingOperationsTableProps> = ({
       const dataEntry = tableData?.[op.outputName];
       let currentValueMinutes = 0;
       
-      if (dataEntry && dataEntry.value != null) {
+      if (dataEntry && typeof dataEntry.value === 'number' && !isNaN(dataEntry.value) && dataEntry.value !== null && dataEntry.value !== undefined) {
         // Use the value directly from API, ignore max
         // The dataEntry.value is already in minutes from the API
         currentValueMinutes = dataEntry.value;
+        if (mode === 'Drilling') {
+          console.log(`✅ Using API value for "${op.outputName}": ${currentValueMinutes} minutes (${formatMinutesToHours(currentValueMinutes)})`);
+        }
       } else {
+        if (mode === 'Drilling') {
+          console.warn(`⚠️ No valid API data for "${op.outputName}"`, {
+            hasDataEntry: !!dataEntry,
+            value: dataEntry?.value,
+            valueType: typeof dataEntry?.value,
+            availableKeys: tableData ? Object.keys(tableData) : []
+          });
+        }
         // Fallback: calculate based on time range if no API data
         // For TIME/HOURS fields, value = minutes in range
         if (op.outputName.includes('TIME') || op.outputName.includes('HOURS')) {

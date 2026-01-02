@@ -90,6 +90,7 @@ const VehicleDashboard: React.FC = () => {
   } | null>(null);
   const [rawTimestamps, setRawTimestamps] = useState<number[]>([]); // Store raw timestamps from API for scrubber
   const { processData, getWindow, clearCache } = useDataProcessor();
+  const rangeChangeTimeoutRef = useRef<NodeJS.Timeout | null>(null); // For debouncing range change API calls
 
   const [errorModal, setErrorModal] = useState<{
     isOpen: boolean;
@@ -335,6 +336,7 @@ useEffect(() => {
 
 
   const handleShowGraph = useCallback((vehicleId: number, date: string, shift: string, reportType: 'Maintenance' | 'Drilling') => {
+    console.log('📋 handleShowGraph called with:', { vehicleId, date, shift, reportType });
     // Clear previous data before loading new data
     setVehicleMetrics([]);
     setDigitalStatusChart({
@@ -345,6 +347,7 @@ useEffect(() => {
     setSelectedTime(null);
     setSelectionStart(null);
     setSelectionEnd(null);
+    setRawTimestamps([]); // Clear raw timestamps
     
     setSelectedVehicleId(vehicleId);
     // Note: selectedVehicleSerialNo is set by the asset:selected event listener
@@ -355,17 +358,32 @@ useEffect(() => {
     setScreenMode(reportType); // Set screen mode from modal
     setShowAssetModal(false);
     
+    // Update URL parameters
+    const params = new URLSearchParams(searchParams);
+    params.set('device_id', String(vehicleId));
+    params.set('date', date);
+    params.set('shift', shift);
+    params.set('reportType', reportType);
+    setSearchParams(params, { replace: true });
+    
     // Dispatch event so FilterControls can initialize with selected values
     window.dispatchEvent(new CustomEvent('asset:selected', {
       detail: {
-        vehicleId,
-        date
+        device_id: String(vehicleId),
+        date,
+        shift,
+        reportType
       }
     }));
     
-    // Dispatch filter apply event
+    // Dispatch filter apply event with all values
     window.dispatchEvent(new CustomEvent('filters:apply', { 
-      detail: { device_id: vehicleId, date } 
+      detail: { 
+        device_id: vehicleId, 
+        date,
+        shift,
+        reportType
+      } 
     }));
   }, [searchParams, setSearchParams]);
 
@@ -532,8 +550,17 @@ useEffect(() => {
       }
       const deviceId = e?.detail?.device_id;
       const date = String(e?.detail?.date || '');
-      const shift = e?.detail?.shift || '6 AM to 6 PM';
-      const reportType = e?.detail?.reportType || 'Maintenance';
+      const shift = e?.detail?.shift || selectedShift || '6 AM to 6 PM';
+      const reportType = e?.detail?.reportType || screenMode || 'Maintenance';
+      
+      console.log('📋 VehicleDashboard: Received filters:apply event:', {
+        deviceId,
+        date,
+        shift,
+        reportType,
+        currentShift: selectedShift,
+        currentScreenMode: screenMode
+      });
       
       if (deviceId) {
         const deviceIdNum = typeof deviceId === 'string' ? Number(deviceId) : deviceId;
@@ -546,9 +573,21 @@ useEffect(() => {
       if (reportType === 'Maintenance' || reportType === 'Drilling') {
         setScreenMode(reportType);
       }
-      if (deviceId && date && !showAssetModal) {
-        const deviceIdNum = typeof deviceId === 'string' ? Number(deviceId) : deviceId;
-        handleShowGraph(deviceIdNum, date, shift, reportType);
+      // Always update state first, then trigger reload
+      // This ensures the useEffect that depends on selectedShift will trigger
+      // Always call handleShowGraph if we have deviceId and date, or use current values if not provided
+      const finalDeviceId = deviceId || selectedVehicleId;
+      const finalDate = date || selectedDate;
+      
+      if (finalDeviceId && finalDate && !showAssetModal) {
+        const deviceIdNum = typeof finalDeviceId === 'string' ? Number(finalDeviceId) : finalDeviceId;
+        console.log('📋 VehicleDashboard: Calling handleShowGraph with:', {
+          vehicleId: deviceIdNum,
+          date: finalDate,
+          shift,
+          reportType
+        });
+        handleShowGraph(deviceIdNum, finalDate, shift, reportType);
       }
     };
     const onOpen = () => setShowFilters(true);
@@ -1021,16 +1060,70 @@ useEffect(() => {
         // Handle API response structure: { success: true, data: {...} }
         if (json.success && json.data) {
           // Extract table data for maintenance mode
-          if (screenMode === 'Maintenance' && json.data.reportingOutputs) {
+          if (screenMode === 'Maintenance') {
+            // Helper function to convert array format to object format
+            const convertArrayToObject = (arr: any[]): Record<string, { value: number; max: number; unit: string }> => {
+              const result: Record<string, { value: number; max: number; unit: string }> = {};
+              
+              if (!Array.isArray(arr)) {
+                // Already an object, return as-is
+                return arr || {};
+              }
+              
+              arr.forEach((item: any) => {
+                const name = String(item.name || '');
+                const valueStr = String(item.value || '0:00:00');
+                const reading = String(item.reading || 'Hours').toUpperCase();
+                
+                // Parse value string (e.g., "5:00:00") to minutes
+                let valueMinutes = 0;
+                try {
+                  const parts = valueStr.split(':');
+                  if (parts.length >= 2) {
+                    const hours = parseInt(parts[0] || '0', 10);
+                    const minutes = parseInt(parts[1] || '0', 10);
+                    const seconds = parts.length > 2 ? parseInt(parts[2] || '0', 10) : 0;
+                    valueMinutes = hours * 60 + minutes + (seconds / 60);
+                  }
+                } catch (e) {
+                  console.warn('⚠️ Failed to parse maintenance value string:', valueStr, e);
+                  valueMinutes = 0;
+                }
+                
+                // Determine unit from reading field
+                let unit = 'HOURS';
+                if (reading.includes('METERS') || reading.includes('METER')) {
+                  unit = 'METERS';
+                } else if (reading.includes('HOURS') || reading.includes('HOUR')) {
+                  unit = 'HOURS';
+                }
+                
+                if (name) {
+                  result[name] = {
+                    value: valueMinutes,
+                    max: 720, // Default max
+                    unit
+                  };
+                  console.log(`📊 Maintenance item: "${name}" = ${valueStr} (${valueMinutes} minutes, unit: ${unit})`);
+                }
+              });
+              
+              return result;
+            };
+            
+            const processedReportingOutputs = convertArrayToObject(json.data.reportingOutputs || []);
+            const processedFaultReportingAnalog = convertArrayToObject(json.data.faultReportingAnalog || []);
+            const processedFaultReportingDigital = convertArrayToObject(json.data.faultReportingDigital || []);
+            
             setMaintenanceTablesData({
-              reportingOutputs: json.data.reportingOutputs || {},
-              faultReportingAnalog: json.data.faultReportingAnalog || {},
-              faultReportingDigital: json.data.faultReportingDigital || {}
+              reportingOutputs: processedReportingOutputs,
+              faultReportingAnalog: processedFaultReportingAnalog,
+              faultReportingDigital: processedFaultReportingDigital
             });
             console.log('✅ Set maintenance tables data from API:', {
-              reportingOutputs: Object.keys(json.data.reportingOutputs || {}).length,
-              faultReportingAnalog: Object.keys(json.data.faultReportingAnalog || {}).length,
-              faultReportingDigital: Object.keys(json.data.faultReportingDigital || {}).length
+              reportingOutputs: Object.keys(processedReportingOutputs).length,
+              faultReportingAnalog: Object.keys(processedFaultReportingAnalog).length,
+              faultReportingDigital: Object.keys(processedFaultReportingDigital).length
             });
           }
           json = json.data; // Extract data from response wrapper
@@ -1139,10 +1232,105 @@ useEffect(() => {
           analogPerMinute: json.analogPerMinute || []
         };
         
-        // Extract table data
+        // Extract table data - handle both array format (new) and object format (old)
         if (json.tableData) {
-          console.log('✅ Setting table data:', Object.keys(json.tableData));
-          setTableData(json.tableData);
+          let processedTableData: Record<string, { value: number; max: number }> = {};
+          
+          if (Array.isArray(json.tableData)) {
+            // New format: array of objects with id, name, value (string), reading
+            console.log('✅ Processing tableData as array format:', json.tableData.length, 'items');
+            json.tableData.forEach((item: any) => {
+              const name = String(item.name || '');
+              const valueStr = String(item.value || '0:00:00');
+              const reading = String(item.reading || 'Hours');
+              
+              // Parse value string (e.g., "5:00:00" or "9:00:00") to minutes
+              // Format: "H:MM:SS" or "HH:MM:SS"
+              let valueMinutes = 0;
+              try {
+                const parts = valueStr.split(':');
+                if (parts.length >= 2) {
+                  const hours = parseInt(parts[0] || '0', 10);
+                  const minutes = parseInt(parts[1] || '0', 10);
+                  const seconds = parts.length > 2 ? parseInt(parts[2] || '0', 10) : 0;
+                  valueMinutes = hours * 60 + minutes + (seconds / 60);
+                  console.log(`⏱️ Parsed "${valueStr}": ${hours}h ${minutes}m ${seconds}s = ${valueMinutes} minutes`);
+                } else {
+                  console.warn(`⚠️ Invalid time format: "${valueStr}"`);
+                }
+              } catch (e) {
+                console.warn('⚠️ Failed to parse value string:', valueStr, e);
+                valueMinutes = 0;
+              }
+              
+              // Use name as key, or construct key with ID if name doesn't match expected format
+              // The table expects keys like "DRILLING TIME (OD101)"
+              let key = name;
+              
+              // Map ID codes to expected format (PR001 -> OD101, etc.)
+              const idToOutputName: Record<string, string> = {
+                'PR001': 'DRILLING TIME (OD101)',
+                'PR002': 'CIRCULATING/SURVEY TIME (OD102)',
+                'PR003': 'ROD TRIPPING TIME (OD103)',
+                'PR004': 'IDLE TIME 1 (OD104)',
+                'PR005': 'IDLE TIME 2 (OD105)',
+                'PR006': 'AIRLIFTING (OD106)'
+              };
+              
+              // Map common name variations to expected format
+              const nameMapping: Record<string, string> = {
+                'DRILLNG TIME': 'DRILLING TIME (OD101)',
+                'DRILLING TIME': 'DRILLING TIME (OD101)',
+                'CIRCULATING/SURVEY TI': 'CIRCULATING/SURVEY TIME (OD102)',
+                'CIRCULATING/SURVEY TIME': 'CIRCULATING/SURVEY TIME (OD102)',
+                'ROD TRIPPING TIME': 'ROD TRIPPING TIME (OD103)',
+                'IDLE TIME 1': 'IDLE TIME 1 (OD104)',
+                'IDLE TIME 2': 'IDLE TIME 2 (OD105)',
+                'AIRLIFTING': 'AIRLIFTING (OD106)'
+              };
+              
+              // First try to use ID mapping (most reliable), then name mapping
+              const itemId = String(item.id || '').trim();
+              if (itemId && idToOutputName[itemId]) {
+                key = idToOutputName[itemId];
+                console.log(`✅ Mapped by ID: ${itemId} -> ${key}`);
+              } else {
+                const nameUpper = name.toUpperCase().trim();
+                // Try exact match first
+                if (nameMapping[nameUpper]) {
+                  key = nameMapping[nameUpper];
+                  console.log(`✅ Mapped by exact name: "${nameUpper}" -> ${key}`);
+                } else {
+                  // Try partial match (for truncated names like "CIRCULATING/SURVEY TI")
+                  const matchedKey = Object.keys(nameMapping).find(mapped => {
+                    const mappedUpper = mapped.toUpperCase();
+                    return nameUpper.includes(mappedUpper) || mappedUpper.includes(nameUpper);
+                  });
+                  if (matchedKey) {
+                    key = nameMapping[matchedKey];
+                    console.log(`✅ Mapped by partial name: "${nameUpper}" matches "${matchedKey}" -> ${key}`);
+                  } else {
+                    console.warn(`⚠️ Could not map name "${name}" (id: ${itemId}), using as-is`);
+                  }
+                }
+              }
+              
+              processedTableData[key] = {
+                value: valueMinutes,
+                max: 720 // Default max (12 hours = 720 minutes)
+              };
+              
+              console.log(`📊 Table item: id=${itemId}, name="${name}" -> key="${key}", value="${valueStr}" = ${valueMinutes} minutes`);
+            });
+          } else if (typeof json.tableData === 'object') {
+            // Old format: object with keys like "DRILLING TIME (OD101)": { value: number, max: number }
+            console.log('✅ Processing tableData as object format:', Object.keys(json.tableData).length, 'items');
+            processedTableData = json.tableData;
+          }
+          
+          console.log('✅ Setting processed table data:', Object.keys(processedTableData));
+          console.log('✅ Processed table data values:', Object.entries(processedTableData).map(([k, v]) => `${k}: ${(v as any).value} minutes`));
+          setTableData(processedTableData);
         } else {
           console.warn('⚠️ No tableData in API response');
         }
@@ -1195,8 +1383,37 @@ useEffect(() => {
         setRawTimestamps(processedTimestamps);
         console.log('✅ Extracted timestamps for scrubber:', processedTimestamps.length, 'points');
         if (processedTimestamps.length > 0) {
-          console.log('✅ First timestamp:', new Date(processedTimestamps[0]).toISOString());
-          console.log('✅ Last timestamp:', new Date(processedTimestamps[processedTimestamps.length - 1]).toISOString());
+          const firstDate = new Date(processedTimestamps[0]);
+          const lastDate = new Date(processedTimestamps[processedTimestamps.length - 1]);
+          console.log('✅ First timestamp (UTC):', 
+            `${String(firstDate.getUTCHours()).padStart(2, '0')}:${String(firstDate.getUTCMinutes()).padStart(2, '0')}:${String(firstDate.getUTCSeconds()).padStart(2, '0')} UTC`,
+            `(${firstDate.toISOString()})`
+          );
+          console.log('✅ Last timestamp (UTC):', 
+            `${String(lastDate.getUTCHours()).padStart(2, '0')}:${String(lastDate.getUTCMinutes()).padStart(2, '0')}:${String(lastDate.getUTCSeconds()).padStart(2, '0')} UTC`,
+            `(${lastDate.toISOString()})`
+          );
+          
+          // Set initial selection range based on actual data timestamps
+          // Use the first and last timestamps from the API data
+          const dataStart = new Date(processedTimestamps[0]);
+          const dataEnd = new Date(processedTimestamps[processedTimestamps.length - 1]);
+          
+          // If we don't have a selection range yet, or if the current range doesn't match the data, update it
+          if (!selectionStart || !selectionEnd || 
+              selectionStart.getTime() < processedTimestamps[0] || 
+              selectionEnd.getTime() > processedTimestamps[processedTimestamps.length - 1]) {
+            setSelectionStart(dataStart);
+            setSelectionEnd(dataEnd);
+            // Set selected time to center of data range
+            const centerTime = new Date((dataStart.getTime() + dataEnd.getTime()) / 2);
+            setSelectedTime(centerTime);
+            console.log('✅ Set selection range to match data timestamps:', 
+              `${String(dataStart.getUTCHours()).padStart(2, '0')}:${String(dataStart.getUTCMinutes()).padStart(2, '0')}:${String(dataStart.getUTCSeconds()).padStart(2, '0')} UTC`,
+              'to',
+              `${String(dataEnd.getUTCHours()).padStart(2, '0')}:${String(dataEnd.getUTCMinutes()).padStart(2, '0')}:${String(dataEnd.getUTCSeconds()).padStart(2, '0')} UTC`
+            );
+          }
         }
         
         // Create a map of time strings to timestamps for efficient lookup
@@ -1212,8 +1429,27 @@ useEffect(() => {
         // Convert analogPerMinute to analogSignals format if needed
         // This conversion is needed because the rest of the code expects analogSignals format
         if (payload.analogPerMinute && payload.analogPerMinute.length > 0) {
-          // Check if any series has points
-          const hasPoints = payload.analogPerMinute.some((series: any) => series.points && series.points.length > 0);
+          // Log series info for debugging
+          console.log('📊 analogPerMinute series count:', payload.analogPerMinute.length);
+          payload.analogPerMinute.forEach((series: any, idx: number) => {
+            console.log(`Series ${idx + 1}:`, {
+              id: series.id,
+              name: series.name,
+              hasPoints: !!series.points,
+              pointsType: Array.isArray(series.points) ? 'array' : typeof series.points,
+              pointsLength: Array.isArray(series.points) ? series.points.length : 'N/A'
+            });
+          });
+          
+          // Check if any series has points - but don't skip processing entirely
+          // The later processing section will handle individual series
+          const hasPoints = payload.analogPerMinute.some((series: any) => 
+            series.points && 
+            (Array.isArray(series.points) ? series.points.length > 0 : series.points !== null)
+          );
+          
+          // Note: We still set analogSignals even if some series have null points
+          // The later processing will handle each series individually
           if (hasPoints) {
           // Convert from analogPerMinute structure to analogSignals structure
           payload.analogSignals = payload.analogPerMinute.map((series: any) => {
@@ -2270,14 +2506,56 @@ useEffect(() => {
               return (numValue * resolution) + offset;
             };
             
+            // Check if points is null, undefined, or empty
+            const pointsData = series.points;
+            if (!pointsData || (Array.isArray(pointsData) && pointsData.length === 0)) {
+              console.warn(`⚠️ Series ${series.id || series.name} has no points data (points is ${pointsData === null ? 'null' : pointsData === undefined ? 'undefined' : 'empty array'}), skipping`);
+              console.groupEnd();
+              return;
+            }
+            
             // Use exact API values, apply resolution and offset, align timestamps to minutes
             // Use null for missing avg/min/max values so line doesn't connect through missing data
-            const rawPts = (series.points || []).map((r: any) => {
-              const time = parseHMS(r.time);
-              // If avg is missing, use null; if min/max are missing, use null or avg if available
-              const avgRaw = r.avg !== null && r.avg !== undefined ? Number(r.avg) : null;
-              const minRaw = r.min !== null && r.min !== undefined ? Number(r.min) : (r.avg !== null && r.avg !== undefined ? Number(r.avg) : null);
-              const maxRaw = r.max !== null && r.max !== undefined ? Number(r.max) : (r.avg !== null && r.avg !== undefined ? Number(r.avg) : null);
+            const rawPts = (Array.isArray(pointsData) ? pointsData : []).map((r: any) => {
+              // Handle case where point might be a number (value) or an object with time/avg/min/max
+              let time: Date;
+              let avgRaw: number | null = null;
+              let minRaw: number | null = null;
+              let maxRaw: number | null = null;
+              
+              if (typeof r === 'number') {
+                // Point is just a number - use timestamp from timestamps array if available
+                const timestampIndex = rawPts.length; // Approximate index
+                if (processedTimestamps.length > timestampIndex) {
+                  time = new Date(processedTimestamps[timestampIndex]);
+                } else {
+                  // Fallback: use current time (shouldn't happen)
+                  time = new Date();
+                }
+                avgRaw = r;
+                minRaw = r;
+                maxRaw = r;
+              } else if (typeof r === 'object' && r !== null) {
+                // Point is an object with time/avg/min/max
+                if (r.time) {
+                  time = parseHMS(r.time);
+                } else {
+                  // No time in point, try to use timestamp from timestamps array
+                  const timestampIndex = rawPts.length;
+                  if (processedTimestamps.length > timestampIndex) {
+                    time = new Date(processedTimestamps[timestampIndex]);
+                  } else {
+                    console.warn(`⚠️ No time in point and no matching timestamp, skipping point`);
+                    return null;
+                  }
+                }
+                avgRaw = r.avg !== null && r.avg !== undefined ? Number(r.avg) : null;
+                minRaw = r.min !== null && r.min !== undefined ? Number(r.min) : (r.avg !== null && r.avg !== undefined ? Number(r.avg) : null);
+                maxRaw = r.max !== null && r.max !== undefined ? Number(r.max) : (r.avg !== null && r.avg !== undefined ? Number(r.avg) : null);
+              } else {
+                console.warn(`⚠️ Unexpected point format, skipping:`, r);
+                return null;
+              }
               
               // Apply transformation to avg, min, max
               const avg = applyTransformation(avgRaw);
@@ -2289,27 +2567,29 @@ useEffect(() => {
                 avg: (avg != null && Number.isFinite(avg) && !isNaN(avg)) ? avg : null,
                 min: (min != null && Number.isFinite(min) && !isNaN(min)) ? min : null,
                 max: (max != null && Number.isFinite(max) && !isNaN(max)) ? max : null,
-                hms: String(r.time)
+                hms: r.time ? String(r.time) : time.toISOString()
               };
-            });
+            }).filter((p): p is { time: Date; avg: number | null; min: number | null; max: number | null; hms: string } => p !== null); // Remove null entries with type guard
             
             // Sort by timestamp
-            rawPts.sort((a: { time: Date; avg: number | null; min: number | null; max: number | null; hms: string }, b: { time: Date; avg: number | null; min: number | null; max: number | null; hms: string }) => a.time.getTime() - b.time.getTime());
+            rawPts.sort((a, b) => a.time.getTime() - b.time.getTime());
             
             if (!rawPts.length) {
-              console.warn('No points in series, skipping');
+              console.warn(`⚠️ No valid points in series ${series.id || series.name} after processing, skipping`);
               console.groupEnd();
               return;
             }
-            const localMin = rawPts[0].time.getTime();
-            const localMax = rawPts[rawPts.length - 1].time.getTime();
+            
+            // TypeScript now knows rawPts[0] and rawPts[rawPts.length - 1] are not null after length check
+            const localMin = rawPts[0]!.time.getTime();
+            const localMax = rawPts[rawPts.length - 1]!.time.getTime();
             perSecondAnalogMinTs = perSecondAnalogMinTs === null ? localMin : Math.min(perSecondAnalogMinTs, localMin);
             perSecondAnalogMaxTs = perSecondAnalogMaxTs === null ? localMax : Math.max(perSecondAnalogMaxTs, localMax);
-            const values: number[] = rawPts.map((p: { time: Date; avg: number | null; min: number | null; max: number | null; hms: string }) => p.avg)
+            const values: number[] = rawPts.map((p) => p.avg)
               .filter((v: number | null): v is number => v != null && Number.isFinite(v) && !isNaN(v));
-            const allMins = rawPts.map((p: { time: Date; avg: number | null; min: number | null; max: number | null; hms: string }) => p.min)
+            const allMins = rawPts.map((p) => p.min)
               .filter((v: number | null): v is number => v != null && Number.isFinite(v) && !isNaN(v));
-            const allMaxs = rawPts.map((p: { time: Date; avg: number | null; min: number | null; max: number | null; hms: string }) => p.max)
+            const allMaxs = rawPts.map((p) => p.max)
               .filter((v: number | null): v is number => v != null && Number.isFinite(v) && !isNaN(v));
             
             // Calculate range safely
@@ -2471,19 +2751,38 @@ useEffect(() => {
             }
           });
         }
-        // Always set initial time range to 6 AM to 6 PM (fixed date for timeline)
-        const baseDate = new Date('2025-01-15');
-        const start6AM = new Date(baseDate);
-        start6AM.setHours(6, 0, 0, 0);
-        const end6PM = new Date(baseDate);
-        end6PM.setHours(18, 0, 0, 0);
-        
-        const center = new Date(Math.floor((start6AM.getTime() + end6PM.getTime()) / 2));
+        // Set initial time range based on actual data timestamps if available
+        // Otherwise fallback to 6 AM to 6 PM (use selected date)
+        if (rawTimestamps.length > 0) {
+          // Use actual data timestamps
+          const dataStart = new Date(rawTimestamps[0]);
+          const dataEnd = new Date(rawTimestamps[rawTimestamps.length - 1]);
+          const center = new Date((dataStart.getTime() + dataEnd.getTime()) / 2);
           setSelectedTime(center);
-        setSelectionStart(start6AM);
-        setSelectionEnd(end6PM);
-        
-        console.log('✅ Set initial time range to 6 AM - 6 PM:', start6AM.toLocaleString(), 'to', end6PM.toLocaleString());
+          setSelectionStart(dataStart);
+          setSelectionEnd(dataEnd);
+          console.log('✅ Set initial time range from data timestamps:', 
+            `${String(dataStart.getUTCHours()).padStart(2, '0')}:${String(dataStart.getUTCMinutes()).padStart(2, '0')}:${String(dataStart.getUTCSeconds()).padStart(2, '0')} UTC`,
+            'to',
+            `${String(dataEnd.getUTCHours()).padStart(2, '0')}:${String(dataEnd.getUTCMinutes()).padStart(2, '0')}:${String(dataEnd.getUTCSeconds()).padStart(2, '0')} UTC`
+          );
+        } else {
+          // Fallback to 6 AM to 6 PM if no timestamps available yet
+          const baseDate = selectedDate ? new Date(selectedDate) : new Date();
+          const start6AM = new Date(baseDate);
+          start6AM.setHours(6, 0, 0, 0);
+          const end6PM = new Date(baseDate);
+          end6PM.setHours(18, 0, 0, 0);
+          
+          const center = new Date(Math.floor((start6AM.getTime() + end6PM.getTime()) / 2));
+              setSelectedTime(center);
+          setSelectionStart(start6AM);
+          setSelectionEnd(end6PM);
+          
+          console.log('✅ Set initial time range to 6 AM - 6 PM (fallback):', start6AM.toLocaleString(), 'to', end6PM.toLocaleString());
+        }
+        console.log('✅ Scrubber data available:', scrubberData.length > 0 ? 'Yes' : 'No', scrubberData.length, 'points');
+        console.log('✅ Raw timestamps available:', rawTimestamps.length > 0 ? 'Yes' : 'No', rawTimestamps.length, 'points');
         }
         
         // Loading state is managed by processDataInChunks
@@ -2531,7 +2830,7 @@ useEffect(() => {
     // Only load if all conditions are met
     console.log('✅ Loading data - modal closed, vehicle and date selected');
     load();
-  }, [selectedVehicleId, selectedDate, showAssetModal, selectedHourRange, screenMode]); // Reload when vehicle/date/hour range/screen mode changes
+  }, [selectedVehicleId, selectedDate, selectedShift, showAssetModal, selectedHourRange, screenMode, selectedVehicleSerialNo]); // Reload when vehicle/date/shift/hour range/screen mode changes
 
 
   // Prepare scrubber data - use raw timestamps from API if available, otherwise fallback to generated data
@@ -2540,15 +2839,31 @@ useEffect(() => {
     if (rawTimestamps.length > 0) {
       const data: Array<{ time: number }> = rawTimestamps.map(ts => ({ time: ts }));
       console.log('✅ Using raw timestamps for scrubber:', data.length, 'points');
+      if (data.length > 0) {
+        console.log('✅ Scrubber time range:', new Date(data[0].time).toISOString(), 'to', new Date(data[data.length - 1].time).toISOString());
+      }
       return data;
     }
     
-    // Priority 2: Fallback to data from charts
+    // Priority 2: Use selection range if available
+    if (selectionStart && selectionEnd) {
+      const startTs = selectionStart.getTime();
+      const endTs = selectionEnd.getTime();
+      if (Number.isFinite(startTs) && Number.isFinite(endTs) && startTs < endTs) {
+        const data: Array<{ time: number }> = [];
+        const step = 60 * 1000; // 1 minute resolution
+        for (let t = startTs; t <= endTs; t += step) {
+          data.push({ time: t });
+        }
+        if (data.length === 0 || data[data.length - 1].time !== endTs) data.push({ time: endTs });
+        console.log('✅ Using selection range for scrubber:', data.length, 'points');
+        return data;
+      }
+    }
+    
+    // Priority 3: Fallback to data from charts
     const candidateStarts: number[] = [];
     const candidateEnds: number[] = [];
-
-    if (selectionStart) candidateStarts.push(selectionStart.getTime());
-    if (selectionEnd) candidateEnds.push(selectionEnd.getTime());
 
     // Consider all analog series
     vehicleMetrics.forEach(m => {
@@ -2566,11 +2881,39 @@ useEffect(() => {
       if (typeof last === 'number') candidateEnds.push(last);
     });
 
-    if (candidateStarts.length === 0 || candidateEnds.length === 0) return [];
+    if (candidateStarts.length === 0 || candidateEnds.length === 0) {
+      console.warn('⚠️ No chart data available for scrubber, using default 6 AM - 6 PM range');
+      // Fallback to default 6 AM - 6 PM range
+      const baseDate = selectedDate ? new Date(selectedDate) : new Date();
+      const start6AM = new Date(baseDate);
+      start6AM.setHours(6, 0, 0, 0);
+      const end6PM = new Date(baseDate);
+      end6PM.setHours(18, 0, 0, 0);
+      const data: Array<{ time: number }> = [];
+      const step = 60 * 1000; // 1 minute resolution
+      for (let t = start6AM.getTime(); t <= end6PM.getTime(); t += step) {
+        data.push({ time: t });
+      }
+      return data;
+    }
 
     const startTs = Math.min(...candidateStarts);
     const endTs = Math.max(...candidateEnds);
-    if (!Number.isFinite(startTs) || !Number.isFinite(endTs) || startTs >= endTs) return [];
+    if (!Number.isFinite(startTs) || !Number.isFinite(endTs) || startTs >= endTs) {
+      console.warn('⚠️ Invalid time range for scrubber, using default 6 AM - 6 PM range');
+      // Fallback to default 6 AM - 6 PM range
+      const baseDate = selectedDate ? new Date(selectedDate) : new Date();
+      const start6AM = new Date(baseDate);
+      start6AM.setHours(6, 0, 0, 0);
+      const end6PM = new Date(baseDate);
+      end6PM.setHours(18, 0, 0, 0);
+      const data: Array<{ time: number }> = [];
+      const step = 60 * 1000; // 1 minute resolution
+      for (let t = start6AM.getTime(); t <= end6PM.getTime(); t += step) {
+        data.push({ time: t });
+      }
+      return data;
+    }
 
     // Generate minute-by-minute data as fallback
     const data: Array<{ time: number }> = [];
@@ -2582,6 +2925,35 @@ useEffect(() => {
     console.log('⚠️ Using generated timestamps for scrubber (fallback):', data.length, 'points');
     return data;
   }, [rawTimestamps, vehicleMetrics, digitalStatusChart, selectionStart, selectionEnd, selectedHourRange, selectedDate]);
+
+  // Update selection range when rawTimestamps are available
+  useEffect(() => {
+    if (rawTimestamps.length > 0) {
+      const dataStart = new Date(rawTimestamps[0]);
+      const dataEnd = new Date(rawTimestamps[rawTimestamps.length - 1]);
+      
+      // Always update if timestamps don't match current selection
+      const currentStart = selectionStart?.getTime();
+      const currentEnd = selectionEnd?.getTime();
+      const dataStartTime = dataStart.getTime();
+      const dataEndTime = dataEnd.getTime();
+      
+      if (!selectionStart || !selectionEnd || 
+          Math.abs(currentStart! - dataStartTime) > 1000 || 
+          Math.abs(currentEnd! - dataEndTime) > 1000) {
+        const centerTime = new Date((dataStartTime + dataEndTime) / 2);
+        
+        setSelectionStart(dataStart);
+        setSelectionEnd(dataEnd);
+        setSelectedTime(centerTime);
+        
+        console.log('✅ Updated selection range from rawTimestamps:', 
+          `selectionStart: ${dataStart.toISOString()} (${String(dataStart.getUTCHours()).padStart(2, '0')}:${String(dataStart.getUTCMinutes()).padStart(2, '0')}:${String(dataStart.getUTCSeconds()).padStart(2, '0')} UTC)`,
+          `selectionEnd: ${dataEnd.toISOString()} (${String(dataEnd.getUTCHours()).padStart(2, '0')}:${String(dataEnd.getUTCMinutes()).padStart(2, '0')}:${String(dataEnd.getUTCSeconds()).padStart(2, '0')} UTC)`
+        );
+      }
+    }
+  }, [rawTimestamps]);
 
   // Calculate synchronized time domain from selection range
   const timeDomain = useMemo<[number, number] | null>(() => {
@@ -2650,6 +3022,212 @@ useEffect(() => {
   }, []); // Always use minute view settings
 
   // Handle selection range change from scrubber
+  // Function to fetch table data for a specific time range
+  const fetchTableDataForRange = useCallback(async (
+    startTime: Date,
+    endTime: Date
+  ) => {
+    if (!selectedVehicleSerialNo || !selectedDate || !selectedShift) {
+      console.warn('⚠️ Cannot fetch table data: missing vehicle, date, or shift');
+      return;
+    }
+
+    try {
+      const shiftParam = formatShiftForAPI(selectedShift);
+      const serialNo = selectedVehicleSerialNo || String(selectedVehicleId);
+      
+      // Format start and end times as ISO strings or timestamps
+      // Convert to UTC and format as HH:mm:ss
+      const formatTimeForAPI = (date: Date): string => {
+        const hours = String(date.getUTCHours()).padStart(2, '0');
+        const minutes = String(date.getUTCMinutes()).padStart(2, '0');
+        const seconds = String(date.getUTCSeconds()).padStart(2, '0');
+        return `${hours}:${minutes}:${seconds}`;
+      };
+
+      const startTimeStr = formatTimeForAPI(startTime);
+      const endTimeStr = formatTimeForAPI(endTime);
+
+      let apiUrl: string;
+      if (screenMode === 'Drilling') {
+        apiUrl = `/reet_python/mccullochs/apis/get_drilling_json.php?devices_serial_no=${encodeURIComponent(serialNo)}&date=${encodeURIComponent(selectedDate)}&shift=${encodeURIComponent(shiftParam)}&start_time=${encodeURIComponent(startTimeStr)}&end_time=${encodeURIComponent(endTimeStr)}`;
+        console.log(`📊 [Drilling] Fetching table data for range: ${startTimeStr} to ${endTimeStr}`, apiUrl);
+      } else {
+        // Maintenance mode - ensure start_time and end_time are sent
+        apiUrl = `/reet_python/mccullochs/apis/get_maintenance_json.php?devices_serial_no=${encodeURIComponent(serialNo)}&date=${encodeURIComponent(selectedDate)}&shift=${encodeURIComponent(shiftParam)}&start_time=${encodeURIComponent(startTimeStr)}&end_time=${encodeURIComponent(endTimeStr)}`;
+        console.log(`📊 [Maintenance] Fetching table data for range: ${startTimeStr} to ${endTimeStr}`, apiUrl);
+        console.log(`📊 [Maintenance] Payload: devices_serial_no=${serialNo}, date=${selectedDate}, shift=${shiftParam}, start_time=${startTimeStr}, end_time=${endTimeStr}`);
+      }
+
+      const response = await fetch(apiUrl, {
+        headers: { 'Accept': 'application/json' },
+        cache: 'no-store',
+        mode: 'cors'
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to load table data: ${response.status} ${response.statusText}`);
+      }
+
+      const responseText = await response.text();
+      let json: any;
+
+      try {
+        json = JSON.parse(responseText);
+      } catch (parseError) {
+        console.error('❌ Failed to parse table data response as JSON:', parseError);
+        throw new Error('Invalid JSON response from API');
+      }
+
+      // Handle API response structure: { success: true, data: {...} }
+      if (json.success && json.data) {
+        json = json.data;
+      }
+
+      // Update table data based on screen mode
+      if (screenMode === 'Drilling' && json.tableData) {
+        // Process drilling table data
+        let processedTableData: Record<string, { value: number; max: number }> = {};
+        
+        if (Array.isArray(json.tableData)) {
+          json.tableData.forEach((item: any) => {
+            const name = String(item.name || '').trim();
+            const valueStr = String(item.value || '0:00:00').trim();
+            let valueMinutes = 0;
+            
+            try {
+              const parts = valueStr.split(':');
+              if (parts.length >= 2) {
+                const hours = parseInt(parts[0] || '0', 10);
+                const minutes = parseInt(parts[1] || '0', 10);
+                const seconds = parts.length > 2 ? parseInt(parts[2] || '0', 10) : 0;
+                valueMinutes = hours * 60 + minutes + (seconds / 60);
+              }
+            } catch (e) {
+              console.warn('⚠️ Failed to parse value string:', valueStr, e);
+              valueMinutes = 0;
+            }
+
+            // Map API IDs/names to expected table keys
+            const idToOutputName: Record<string, string> = {
+              'PR001': 'DRILLING TIME (OD101)',
+              'PR002': 'CIRCULATING/SURVEY TIME (OD102)',
+              'PR003': 'ROD TRIPPING TIME (OD103)',
+              'PR004': 'IDLE TIME 1 (OD104)',
+              'PR005': 'IDLE TIME 2 (OD105)',
+              'PR006': 'AIRLIFTING (OD106)'
+            };
+
+            const nameMapping: Record<string, string> = {
+              'DRILLNG TIME': 'DRILLING TIME (OD101)',
+              'DRILLING TIME': 'DRILLING TIME (OD101)',
+              'CIRCULATING/SURVEY TI': 'CIRCULATING/SURVEY TIME (OD102)',
+              'CIRCULATING/SURVEY TIME': 'CIRCULATING/SURVEY TIME (OD102)',
+              'ROD TRIPPING TIME': 'ROD TRIPPING TIME (OD103)',
+              'IDLE TIME 1': 'IDLE TIME 1 (OD104)',
+              'IDLE TIME 2': 'IDLE TIME 2 (OD105)',
+              'AIRLIFTING': 'AIRLIFTING (OD106)'
+            };
+
+            const itemId = String(item.id || '').trim();
+            let key = name;
+            
+            if (itemId && idToOutputName[itemId]) {
+              key = idToOutputName[itemId];
+            } else {
+              const nameUpper = name.toUpperCase().trim();
+              if (nameMapping[nameUpper]) {
+                key = nameMapping[nameUpper];
+              } else {
+                const matchedKey = Object.keys(nameMapping).find(mapped => {
+                  const mappedUpper = mapped.toUpperCase();
+                  return nameUpper.includes(mappedUpper) || mappedUpper.includes(nameUpper);
+                });
+                if (matchedKey) {
+                  key = nameMapping[matchedKey];
+                }
+              }
+            }
+
+            processedTableData[key] = {
+              value: valueMinutes,
+              max: 720
+            };
+          });
+        } else if (typeof json.tableData === 'object') {
+          processedTableData = json.tableData;
+        }
+
+        setTableData(processedTableData);
+        console.log('✅ Updated drilling table data for range:', Object.keys(processedTableData).length, 'items');
+      } else if (screenMode === 'Maintenance') {
+        // Process maintenance table data
+        const convertArrayToObject = (arr: any[]): Record<string, { value: number; max: number; unit: string }> => {
+          const result: Record<string, { value: number; max: number; unit: string }> = {};
+          
+          if (!Array.isArray(arr)) {
+            return arr || {};
+          }
+          
+          arr.forEach((item: any) => {
+            const name = String(item.name || '');
+            const valueStr = String(item.value || '0:00:00');
+            const reading = String(item.reading || 'Hours').toUpperCase();
+            
+            let valueMinutes = 0;
+            try {
+              const parts = valueStr.split(':');
+              if (parts.length >= 2) {
+                const hours = parseInt(parts[0] || '0', 10);
+                const minutes = parseInt(parts[1] || '0', 10);
+                const seconds = parts.length > 2 ? parseInt(parts[2] || '0', 10) : 0;
+                valueMinutes = hours * 60 + minutes + (seconds / 60);
+              }
+            } catch (e) {
+              console.warn('⚠️ Failed to parse maintenance value string:', valueStr, e);
+              valueMinutes = 0;
+            }
+            
+            let unit = 'HOURS';
+            if (reading.includes('METERS') || reading.includes('METER')) {
+              unit = 'METERS';
+            } else if (reading.includes('HOURS') || reading.includes('HOUR')) {
+              unit = 'HOURS';
+            }
+            
+            if (name) {
+              result[name] = {
+                value: valueMinutes,
+                max: 720,
+                unit
+              };
+            }
+          });
+          
+          return result;
+        };
+        
+        const processedReportingOutputs = convertArrayToObject(json.reportingOutputs || []);
+        const processedFaultReportingAnalog = convertArrayToObject(json.faultReportingAnalog || []);
+        const processedFaultReportingDigital = convertArrayToObject(json.faultReportingDigital || []);
+        
+        setMaintenanceTablesData({
+          reportingOutputs: processedReportingOutputs,
+          faultReportingAnalog: processedFaultReportingAnalog,
+          faultReportingDigital: processedFaultReportingDigital
+        });
+        console.log('✅ Updated maintenance table data for range:', {
+          reportingOutputs: Object.keys(processedReportingOutputs).length,
+          faultReportingAnalog: Object.keys(processedFaultReportingAnalog).length,
+          faultReportingDigital: Object.keys(processedFaultReportingDigital).length
+        });
+      }
+    } catch (error: any) {
+      console.error('❌ Error fetching table data for range:', error);
+      // Don't show error modal, just log it
+    }
+  }, [selectedVehicleSerialNo, selectedDate, selectedShift, selectedVehicleId, screenMode]);
+
   const handleSelectionChange = useCallback((startTimestamp: number, endTimestamp: number) => {
     const start = new Date(startTimestamp);
     const end = new Date(endTimestamp);
@@ -2669,7 +3247,18 @@ useEffect(() => {
     // Update selected time to center of range if needed
     const centerTime = new Date((newStart.getTime() + newEnd.getTime()) / 2);
     setSelectedTime(centerTime);
-  }, []); // Always use minute view settings
+
+    // Debounce API call to avoid too many requests while dragging
+    // Clear any pending timeout
+    if (rangeChangeTimeoutRef.current) {
+      clearTimeout(rangeChangeTimeoutRef.current);
+    }
+
+    // Set a new timeout to fetch table data after user stops dragging (500ms delay)
+    rangeChangeTimeoutRef.current = setTimeout(() => {
+      fetchTableDataForRange(newStart, newEnd);
+    }, 500);
+  }, [fetchTableDataForRange]); // Always use minute view settings
 
   // Handle hover from scrubber
   const handleHover = useCallback((_timestamp: number | null) => {
@@ -2707,12 +3296,12 @@ useEffect(() => {
             </span> */}
           </div>
         </div>
-        {scrubberData.length > 0 && (
+        {scrubberData.length > 0 && selectionStart && selectionEnd && (
           <TimeScrubber
             data={scrubberData}
             selectedTime={selectedTime?.getTime() || null}
-            selectionStart={selectionStart?.getTime() || null}
-            selectionEnd={selectionEnd?.getTime() || null}
+            selectionStart={selectionStart.getTime()}
+            selectionEnd={selectionEnd.getTime()}
             onTimeChange={handleTimeChange}
             onSelectionChange={handleSelectionChange}
             onHover={handleHover}

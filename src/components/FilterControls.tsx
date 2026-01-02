@@ -669,6 +669,7 @@ const FilterControls: React.FC = () => {
     
     if (urlDeviceId && urlDate) {
       console.log('📋 FilterControls: Auto-selecting from URL params - deviceId:', urlDeviceId, 'date:', urlDate);
+      isInitializingFromUrl.current = true; // Set flag to prevent auto-dispatch
       setSelectedVehicleId(String(urlDeviceId));
       setSelectedDate(urlDate);
       // Dispatch event so other components know about the selection
@@ -678,6 +679,13 @@ const FilterControls: React.FC = () => {
           date: urlDate
         }
       }));
+      // Reset flag after a short delay
+      setTimeout(() => {
+        isInitializingFromUrl.current = false;
+      }, 100);
+    } else {
+      // No URL params - don't auto-select, let modal handle it
+      isInitializingFromUrl.current = false;
     }
   }, [searchParams]);
 
@@ -686,15 +694,21 @@ const FilterControls: React.FC = () => {
     const onAssetSelected = (e: any) => {
       const deviceId = String(e?.detail?.device_id || '');
       const date = String(e?.detail?.date || '');
+      const shift = String(e?.detail?.shift || '6 AM to 6 PM');
       const reportType = e?.detail?.reportType;
       
       if (deviceId) {
-        console.log('📋 FilterControls: Received asset selection:', { deviceId, date, reportType });
+        console.log('📋 FilterControls: Received asset selection:', { deviceId, date, shift, reportType });
         setSelectedVehicleId(deviceId);
         // Always set the date from the modal if provided
         if (date) {
           setSelectedDate(date);
           console.log('📋 FilterControls: Set date from asset selection:', date);
+        }
+        // Set shift from asset selection if provided
+        if (shift && (shift === '6 AM to 6 PM' || shift === '6 PM to 6 AM')) {
+          setSelectedShift(shift);
+          console.log('📋 FilterControls: Set shift from asset selection:', shift);
         }
         // Set screen mode from reportType if provided
         if (reportType === 'Maintenance' || reportType === 'Drilling') {
@@ -708,6 +722,9 @@ const FilterControls: React.FC = () => {
     const onFiltersApply = (e: any) => {
       const deviceId = String(e?.detail?.device_id || '');
       const date = String(e?.detail?.date || '');
+      const shift = String(e?.detail?.shift || '');
+      const reportType = e?.detail?.reportType;
+      
       if (deviceId) {
         if (!selectedVehicleId || selectedVehicleId !== deviceId) {
           console.log('📋 FilterControls: Received filters:apply, updating vehicle:', { deviceId });
@@ -716,6 +733,14 @@ const FilterControls: React.FC = () => {
         // If date is provided, use it; otherwise it will auto-select when dates load
         if (date && (!selectedDate || selectedDate !== date)) {
           setSelectedDate(date);
+        }
+        // Update shift if provided
+        if (shift && (shift === '6 AM to 6 PM' || shift === '6 PM to 6 AM')) {
+          setSelectedShift(shift);
+        }
+        // Update screen mode if provided
+        if (reportType === 'Maintenance' || reportType === 'Drilling') {
+          setScreenMode(reportType);
         }
       }
     };
@@ -732,6 +757,7 @@ const FilterControls: React.FC = () => {
   const [selectedShift, setSelectedShift] = useState<string>('6 AM to 6 PM');
   const [loadingVehicles, setLoadingVehicles] = useState<boolean>(false);
   const [loadingDates, setLoadingDates] = useState<boolean>(false);
+  const isInitializingFromUrl = useRef<boolean>(false); // Track if we're initializing from URL params
 
   // Load vehicles from API
   useEffect(() => {
@@ -777,9 +803,15 @@ const FilterControls: React.FC = () => {
           : [];
         if (aborted) return;
         setVehicles(arr);
-        // Auto-select first vehicle if none selected and we have vehicles
-        if (!selectedVehicleId && arr.length > 0) {
-          setSelectedVehicleId(arr[0].id);
+        // Only auto-select first vehicle if we have URL params (user came from a link/bookmark)
+        // Otherwise, let the Asset Chart modal handle the selection
+        const urlDeviceId = searchParams.get('device_id') || searchParams.get('vehicle');
+        if (!selectedVehicleId && arr.length > 0 && urlDeviceId) {
+          // URL params exist, so auto-select matching vehicle
+          const matchingVehicle = arr.find(v => v.id === String(urlDeviceId));
+          if (matchingVehicle) {
+            setSelectedVehicleId(matchingVehicle.id);
+          }
         }
       } catch (err) {
         console.error('❌ FilterControls: Error loading vehicles:', err);
@@ -842,12 +874,27 @@ const FilterControls: React.FC = () => {
         arr.sort((a, b) => b.localeCompare(a)); // Sort descending (most recent first)
         if (aborted) return;
         setDates(arr);
-        // Auto-select the first (most recent) date if available and no date is selected
-        if (arr.length > 0 && !selectedDate) {
-          setSelectedDate(arr[0]);
-        } else if (arr.length > 0 && selectedDate && !arr.includes(selectedDate)) {
-          // If current date is not in the list, select the most recent
-          setSelectedDate(arr[0]);
+        // Only auto-select date if we have URL params (user came from a link/bookmark)
+        // Otherwise, let the Asset Chart modal handle the selection
+        const urlDate = searchParams.get('date');
+        if (arr.length > 0) {
+          if (urlDate && arr.includes(urlDate)) {
+            // URL has a date that's in the available dates, use it
+            setSelectedDate(urlDate);
+          } else if (urlDate && !arr.includes(urlDate)) {
+            // URL has a date but it's not available, select most recent
+            setSelectedDate(arr[0]);
+          } else if (!selectedDate) {
+            // No URL date and no selected date - don't auto-select, let modal handle it
+            // Only set if we have a vehicle selected from URL
+            const urlDeviceId = searchParams.get('device_id') || searchParams.get('vehicle');
+            if (urlDeviceId) {
+              setSelectedDate(arr[0]);
+            }
+          } else if (selectedDate && !arr.includes(selectedDate)) {
+            // Current date is not in the list, select most recent
+            setSelectedDate(arr[0]);
+          }
         }
       } catch (e) {
         console.error('❌ FilterControls: Error loading dates:', e);
@@ -894,13 +941,32 @@ const FilterControls: React.FC = () => {
   };
   
   // Dispatch event when vehicle, date, shift, or screen mode changes to trigger chart reload
+  // Only dispatch if this is a user action, not initial load from URL
   useEffect(() => {
+    // Skip if we're initializing from URL params (to prevent auto-loading and hiding modal)
+    if (isInitializingFromUrl.current) {
+      // Reset flag after initial load
+      setTimeout(() => {
+        isInitializingFromUrl.current = false;
+      }, 100);
+      return;
+    }
+    
     if (selectedVehicleId && selectedDate) {
       // Update URL parameters
       const params = new URLSearchParams(searchParams);
       params.set('device_id', selectedVehicleId);
       params.set('date', selectedDate);
+      params.set('shift', selectedShift);
+      params.set('reportType', screenMode);
       setSearchParams(params, { replace: true });
+      
+      console.log('📋 FilterControls: Dispatching filters:apply with:', {
+        device_id: selectedVehicleId,
+        date: selectedDate,
+        shift: selectedShift,
+        reportType: screenMode
+      });
       
       // Dispatch filters:apply event to notify VehicleDashboard to reload charts
       window.dispatchEvent(new CustomEvent('filters:apply', {

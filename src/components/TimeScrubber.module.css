@@ -63,6 +63,8 @@
   justify-content: center;
   pointer-events: auto;
   cursor: ew-resize;
+  z-index: 20;
+  background: transparent;
 }
 .rangeHandle::after {
   content: '';
