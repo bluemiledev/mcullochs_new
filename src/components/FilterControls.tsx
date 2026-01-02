@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState, useRef } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useLocation } from 'react-router-dom';
 import { DayPicker } from 'react-day-picker';
 import 'react-day-picker/dist/style.css';
 import html2canvas from 'html2canvas';
@@ -654,6 +654,7 @@ if (typeof window !== 'undefined') {
 const FilterControls: React.FC = () => {
   type Vehicle = { id: string; name: string; rego: string };
   const [searchParams, setSearchParams] = useSearchParams();
+  const location = useLocation();
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [selectedVehicleId, setSelectedVehicleId] = useState<string>('');
   const [dates, setDates] = useState<string[]>([]);
@@ -943,6 +944,14 @@ const FilterControls: React.FC = () => {
   // Dispatch event when vehicle, date, shift, or screen mode changes to trigger chart reload
   // Only dispatch if this is a user action, not initial load from URL
   useEffect(() => {
+    // Don't dispatch events if we're on the maintenance-detail page
+    // This prevents unwanted redirects when the detail page loads
+    const currentPath = window.location.pathname;
+    if (currentPath === '/maintenance-detail') {
+      console.log('🚫 FilterControls: On maintenance-detail page, skipping event dispatch');
+      return;
+    }
+    
     // Skip if we're initializing from URL params (to prevent auto-loading and hiding modal)
     if (isInitializingFromUrl.current) {
       // Reset flag after initial load

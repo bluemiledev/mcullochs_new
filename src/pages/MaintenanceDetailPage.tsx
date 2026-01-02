@@ -3,11 +3,13 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import FilterControls from '../components/FilterControls';
 import TimeScrubber from '../components/TimeScrubber';
 import { getMockInstances } from '../utils/mockMaintenanceData';
+import { formatShiftForAPI } from '../utils';
 import styles from './MaintenanceDetailPage.module.css';
 
 interface Instance {
   time: string;
   value: number;
+  matched?: boolean;
 }
 
 const ITEMS_PER_PAGE = 10;
@@ -20,6 +22,17 @@ const MaintenanceDetailPage: React.FC = () => {
   // Get output name from URL params
   const outputName = searchParams.get('outputName') || '';
   const [instances, setInstances] = useState<Instance[]>([]);
+  
+  // Debug: Log when component mounts
+  useEffect(() => {
+    console.log('📄 MaintenanceDetailPage mounted');
+    console.log('📄 Current URL:', window.location.href);
+    console.log('📄 outputName:', outputName);
+    console.log('📄 Current URL params:', Object.fromEntries(searchParams.entries()));
+    
+    // If no outputName, we should still render the page (just show error message)
+    // Don't redirect - let the user see the error
+  }, [outputName, searchParams]);
   
   // Active filter state for summary boxes
   const [activeFilter, setActiveFilter] = useState<'all' | 'meets' | 'falls'>('meets');
@@ -46,44 +59,133 @@ const MaintenanceDetailPage: React.FC = () => {
     setSelectedTime(new Date((start.getTime() + end.getTime()) / 2));
   }, []);
 
-  // Load instances when output name changes
+  // Load instances when output name changes or time range changes
   useEffect(() => {
-    if (outputName) {
-      // TODO: Replace with API call
+    if (!outputName) return;
+    
+    const deviceId = searchParams.get('device_id') || searchParams.get('vehicle');
+    const date = searchParams.get('date');
+    const shift = searchParams.get('shift') || '6 AM to 6 PM';
+    const id = searchParams.get('id');
+    const name = searchParams.get('name') || outputName;
+    const value = searchParams.get('value');
+    const reading = searchParams.get('reading') || 'Hours';
+    
+    if (!deviceId || !date || !id || !name || !value) {
+      console.warn('⚠️ Missing required parameters for API call:', { deviceId, date, id, name, value });
+      // Fallback to mock data if required params are missing
       const mockData = getMockInstances(outputName);
       setInstances(mockData);
-      setCurrentPage(1); // Reset to first page
+      setCurrentPage(1);
+      return;
     }
-  }, [outputName]);
-
-  // Listen to screen mode changes - navigate back to main page if mode changes
-  useEffect(() => {
-    const handleScreenModeChange = (e: any) => {
-      const mode = e?.detail?.mode;
-      if (mode === 'Drilling' || mode === 'Maintenance') {
-        // Get current URL params to preserve vehicle/date
-        const deviceId = searchParams.get('device_id') || searchParams.get('vehicle');
-        const date = searchParams.get('date');
+    
+    const loadData = async () => {
+      try {
+        // Format start and end times for API (UTC format HH:mm:ss)
+        const formatTimeForAPI = (date: Date | null): string => {
+          if (!date) return '06:00:00';
+          const hours = String(date.getUTCHours()).padStart(2, '0');
+          const minutes = String(date.getUTCMinutes()).padStart(2, '0');
+          const seconds = String(date.getUTCSeconds()).padStart(2, '0');
+          return `${hours}:${minutes}:${seconds}`;
+        };
         
-        // Navigate back to main page with preserved params
-        const params = new URLSearchParams();
-        if (deviceId) {
-          params.set('device_id', deviceId);
-        }
-        if (date) {
-          params.set('date', date);
+        const shiftParam = formatShiftForAPI(shift);
+        const startTimeStr = formatTimeForAPI(selectionStart);
+        const endTimeStr = formatTimeForAPI(selectionEnd);
+        
+        // Build API URL
+        const apiUrl = `/reet_python/mccullochs/apis/get_data.php?` +
+          `devices_serial_no=${encodeURIComponent(deviceId)}&` +
+          `date=${encodeURIComponent(date)}&` +
+          `shift=${encodeURIComponent(shiftParam)}&` +
+          `start_time=${encodeURIComponent(startTimeStr)}&` +
+          `end_time=${encodeURIComponent(endTimeStr)}&` +
+          `id=${encodeURIComponent(id)}&` +
+          `name=${encodeURIComponent(name)}&` +
+          `value=${encodeURIComponent(value)}&` +
+          `reading=${encodeURIComponent(reading)}`;
+        
+        console.log('📊 Fetching maintenance detail data from API:', apiUrl);
+        
+        const response = await fetch(apiUrl, {
+          headers: { 'Accept': 'application/json' },
+          cache: 'no-store',
+          mode: 'cors'
+        });
+        
+        if (!response.ok) {
+          throw new Error(`Failed to load data: ${response.status} ${response.statusText}`);
         }
         
-        const backUrl = params.toString() ? `/?${params.toString()}` : '/';
-        navigate(backUrl);
+        const responseText = await response.text();
+        let json: any;
+        
+        try {
+          json = JSON.parse(responseText);
+        } catch (parseError) {
+          console.error('❌ Failed to parse response as JSON:', parseError);
+          throw new Error('Invalid JSON response from API');
+        }
+        
+        // Handle API response structure: { success: true, data: { data: [...], total_pages: 10, per_page: 5 } }
+        // The API returns paginated data with nested structure
+        let dataArray: any[] = [];
+        
+        if (json.success) {
+          // Check for nested data structure: { success: true, data: { data: [...] } }
+          if (json.data && json.data.data && Array.isArray(json.data.data)) {
+            // Format: { success: true, data: { data: [...], total_pages: 10, per_page: 5 } }
+            dataArray = json.data.data;
+            console.log('✅ Found paginated data structure:', {
+              total_pages: json.data.total_pages,
+              per_page: json.data.per_page,
+              items: dataArray.length
+            });
+          } else if (Array.isArray(json.data)) {
+            // Format: { success: true, data: [...] } (non-paginated)
+            dataArray = json.data;
+            console.log('✅ Found direct array in json.data');
+          } else if (Array.isArray(json)) {
+            // Format: [...] (direct array)
+            dataArray = json;
+            console.log('✅ Found direct array');
+          } else {
+            console.warn('⚠️ API response format unexpected:', json);
+            console.warn('⚠️ Expected array in json.data.data, json.data, or json itself');
+            setInstances([]);
+            return;
+          }
+          
+          const apiInstances: Instance[] = dataArray.map((item: any) => ({
+            time: String(item.time || ''),
+            value: Number(item.value || 0),
+            matched: Boolean(item.matched)
+          }));
+          
+          setInstances(apiInstances);
+          setCurrentPage(1); // Reset to first page
+          console.log('✅ Loaded', apiInstances.length, 'instances from API');
+        } else {
+          console.warn('⚠️ API response indicates failure:', json);
+          setInstances([]);
+        }
+      } catch (error: any) {
+        console.error('❌ Error loading maintenance detail data:', error);
+        // Fallback to mock data on error
+        const mockData = getMockInstances(outputName);
+        setInstances(mockData);
+        setCurrentPage(1);
       }
     };
     
-    window.addEventListener('screen-mode:changed', handleScreenModeChange as any);
-    return () => {
-      window.removeEventListener('screen-mode:changed', handleScreenModeChange as any);
-    };
-  }, [navigate, searchParams]);
+    loadData();
+  }, [outputName, searchParams, selectionStart, selectionEnd]);
+
+  // REMOVED: screen-mode:changed listener that was causing redirects
+  // We don't want to navigate away from the detail page when mode changes
+  // The user can use the back button or change mode from the main page
 
   // Prepare scrubber data - per-second in second view mode, per-minute otherwise
   const scrubberData = useMemo(() => {
@@ -184,25 +286,24 @@ const MaintenanceDetailPage: React.FC = () => {
     // Intentionally no-op: keep pointer/red-line fixed unless knob is dragged
   }, []);
 
-  // Calculate statistics
+  // Calculate statistics based on matched field from API
   const stats = useMemo(() => {
     const total = instances.length;
-    // Criteria: value > 380 means "Meets Criteria", <= 380 means "Falls Criteria"
-    // This threshold can be customized based on actual criteria or API response
-    const meetsCriteria = instances.filter(inst => inst.value > 380).length;
-    const fallsCriteria = total - meetsCriteria;
+    // Use matched field from API: true = "Meets Criteria", false = "Falls Criteria"
+    const meetsCriteria = instances.filter(inst => inst.matched === true).length;
+    const fallsCriteria = instances.filter(inst => inst.matched === false).length;
     
     return { total, meetsCriteria, fallsCriteria };
   }, [instances]);
   
-  // Filter instances based on active filter
+  // Filter instances based on active filter using matched field
   const filteredInstances = useMemo(() => {
     if (activeFilter === 'all') {
       return instances;
     } else if (activeFilter === 'meets') {
-      return instances.filter(inst => inst.value > 380);
+      return instances.filter(inst => inst.matched === true);
     } else {
-      return instances.filter(inst => inst.value <= 380);
+      return instances.filter(inst => inst.matched === false);
     }
   }, [instances, activeFilter]);
 
