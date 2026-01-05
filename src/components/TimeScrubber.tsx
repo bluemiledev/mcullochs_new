@@ -20,6 +20,7 @@ interface TimeScrubberProps {
   onSelectionChange: (start: number, end: number) => void;
   onHover: (time: number | null) => void;
   isSecondViewMode?: boolean;
+  showVehiclePointer?: boolean; // Show vehicle pointer (default: true for drilling, false for maintenance)
 }
 
 const BASE_LEFT_MARGIN = 20; // same as charts
@@ -38,6 +39,7 @@ const TimeScrubber: React.FC<TimeScrubberProps> = ({
   onSelectionChange,
   onHover,
   isSecondViewMode = false,
+  showVehiclePointer = true,
 }) => {
   const scrubberData = useMemo(() => {
     return data.map(d => ({
@@ -526,8 +528,8 @@ const TimeScrubber: React.FC<TimeScrubberProps> = ({
               fillOpacity={0.3}
               isAnimationActive={false}
             />
-            {/* Keep vehicle pointer line (selected time) */}
-            {selectedTime !== null && (
+            {/* Show vehicle pointer line (selected time) only if showVehiclePointer is true */}
+            {showVehiclePointer && selectedTime !== null && (
               <ReferenceLine
                 x={selectedTime}
                 stroke="#ef4444"
@@ -538,7 +540,7 @@ const TimeScrubber: React.FC<TimeScrubberProps> = ({
           </AreaChart>
         </ResponsiveContainer>
         <div className={styles.pointerOverlay} ref={overlayRef}>
-          {selectedLeftPx !== null && (
+          {showVehiclePointer && selectedLeftPx !== null && (
             <div
               className={styles.vehiclePointer}
               style={{ left: `${selectedLeftPx}px`, transform: 'translateX(-50%)' }}

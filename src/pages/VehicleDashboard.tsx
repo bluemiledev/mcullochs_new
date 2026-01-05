@@ -3302,6 +3302,7 @@ useEffect(() => {
             onSelectionChange={handleSelectionChange}
             onHover={handleHover}
             isSecondViewMode={false}
+            showVehiclePointer={screenMode === 'Drilling'}
           />
         )}
       </div>

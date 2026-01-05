@@ -47,141 +47,219 @@ const MaintenanceDetailPage: React.FC = () => {
   const lastUpdateRef = useRef<number>(0);
   const THROTTLE_MS = 16; // ~60fps
 
-  // Initialize default time range (6 AM to 6 PM for today)
+  const rangeChangeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Params from URL
+  const deviceId = searchParams.get('device_id') || searchParams.get('vehicle');
+  const date = searchParams.get('date');
+  const shift = searchParams.get('shift') || '6 AM to 6 PM';
+  const id = searchParams.get('id');
+  const name = searchParams.get('name') || outputName;
+  const value = searchParams.get('value');
+  const reading = searchParams.get('reading') || 'Hours';
+
+  // Scrubber domain should stay fixed for the full shift (like VehicleDashboard's rawTimestamps),
+  // while the user-selected range (selectionStart/End) can move within it.
+  const shiftDomain = useMemo(() => {
+    const parseShiftToTimes = (shiftStr: string): {
+      startH: number; startM: number; startS: number;
+      endH: number; endM: number; endS: number;
+    } => {
+      if (!shiftStr || typeof shiftStr !== 'string') {
+        return { startH: 6, startM: 0, startS: 0, endH: 18, endM: 0, endS: 0 };
+      }
+
+      // API format: "HH:mm:sstoHH:mm:ss" (optionally with spaces around "to")
+      const apiMatch = shiftStr.match(/(\d{2}):(\d{2}):(\d{2})\s*to\s*(\d{2}):(\d{2}):(\d{2})/i);
+      if (apiMatch) {
+        return {
+          startH: parseInt(apiMatch[1], 10),
+          startM: parseInt(apiMatch[2], 10),
+          startS: parseInt(apiMatch[3], 10),
+          endH: parseInt(apiMatch[4], 10),
+          endM: parseInt(apiMatch[5], 10),
+          endS: parseInt(apiMatch[6], 10),
+        };
+      }
+
+      // UI format: "6 AM to 6 PM"
+      const uiMatch = shiftStr.match(/(\d+)\s*(AM|PM)\s+to\s+(\d+)\s*(AM|PM)/i);
+      if (uiMatch) {
+        let startHour = parseInt(uiMatch[1], 10);
+        const startPeriod = uiMatch[2].toUpperCase();
+        let endHour = parseInt(uiMatch[3], 10);
+        const endPeriod = uiMatch[4].toUpperCase();
+
+        // Convert to 24-hour format
+        if (startPeriod === 'PM' && startHour !== 12) startHour += 12;
+        if (startPeriod === 'AM' && startHour === 12) startHour = 0;
+        if (endPeriod === 'PM' && endHour !== 12) endHour += 12;
+        if (endPeriod === 'AM' && endHour === 12) endHour = 0;
+
+        return { startH: startHour, startM: 0, startS: 0, endH: endHour, endM: 0, endS: 0 };
+      }
+
+      return { startH: 6, startM: 0, startS: 0, endH: 18, endM: 0, endS: 0 };
+    };
+
+    const { startH, startM, startS, endH, endM, endS } = parseShiftToTimes(shift);
+
+    // Use the selected date if available; otherwise use today. Always set times in UTC to match TimeScrubber tick formatting and API payload.
+    let base = date ? new Date(`${date}T00:00:00Z`) : new Date();
+    if (!date) {
+      base = new Date();
+      base.setUTCHours(0, 0, 0, 0);
+    }
+    if (!Number.isFinite(base.getTime())) {
+      base = new Date();
+      base.setUTCHours(0, 0, 0, 0);
+    }
+
+    const start = new Date(base);
+    start.setUTCHours(startH, startM, startS, 0);
+    const end = new Date(base);
+    end.setUTCHours(endH, endM, endS, 0);
+
+    // Handle shifts that cross midnight (e.g. 6 PM to 6 AM)
+    if (end.getTime() <= start.getTime()) {
+      end.setUTCDate(end.getUTCDate() + 1);
+    }
+
+    return { startMs: start.getTime(), endMs: end.getTime() };
+  }, [date, shift]);
+
+  // Initialize/reset selection to full shift when shift or date changes (but NOT when user drags the range)
   useEffect(() => {
-    const today = new Date();
-    const start = new Date(today);
-    start.setHours(6, 0, 0, 0);
-    const end = new Date(today);
-    end.setHours(18, 0, 0, 0);
+    if (!Number.isFinite(shiftDomain.startMs) || !Number.isFinite(shiftDomain.endMs) || shiftDomain.startMs >= shiftDomain.endMs) {
+      return;
+    }
+    if (rangeChangeTimeoutRef.current) {
+      clearTimeout(rangeChangeTimeoutRef.current);
+      rangeChangeTimeoutRef.current = null;
+    }
+
+    const start = new Date(shiftDomain.startMs);
+    const end = new Date(shiftDomain.endMs);
     setSelectionStart(start);
     setSelectionEnd(end);
-    setSelectedTime(new Date((start.getTime() + end.getTime()) / 2));
-  }, []);
+    setSelectedTime(new Date((shiftDomain.startMs + shiftDomain.endMs) / 2));
+  }, [shiftDomain.startMs, shiftDomain.endMs]);
 
-  // Load instances when output name changes or time range changes
-  useEffect(() => {
+  const loadDataForRange = useCallback(async (rangeStart: Date, rangeEnd: Date) => {
     if (!outputName) return;
-    
-    const deviceId = searchParams.get('device_id') || searchParams.get('vehicle');
-    const date = searchParams.get('date');
-    const shift = searchParams.get('shift') || '6 AM to 6 PM';
-    const id = searchParams.get('id');
-    const name = searchParams.get('name') || outputName;
-    const value = searchParams.get('value');
-    const reading = searchParams.get('reading') || 'Hours';
-    
+
     if (!deviceId || !date || !id || !name || !value) {
       console.warn('⚠️ Missing required parameters for API call:', { deviceId, date, id, name, value });
-      // Fallback to mock data if required params are missing
       const mockData = getMockInstances(outputName);
       setInstances(mockData);
       setCurrentPage(1);
       return;
     }
-    
-    const loadData = async () => {
-      try {
-        // Format start and end times for API (UTC format HH:mm:ss)
-        const formatTimeForAPI = (date: Date | null): string => {
-          if (!date) return '06:00:00';
-          const hours = String(date.getUTCHours()).padStart(2, '0');
-          const minutes = String(date.getUTCMinutes()).padStart(2, '0');
-          const seconds = String(date.getUTCSeconds()).padStart(2, '0');
-          return `${hours}:${minutes}:${seconds}`;
-        };
-        
-        const shiftParam = formatShiftForAPI(shift);
-        const startTimeStr = formatTimeForAPI(selectionStart);
-        const endTimeStr = formatTimeForAPI(selectionEnd);
-        
-        // Build API URL
-        const apiUrl = `/reet_python/mccullochs/apis/get_data.php?` +
-          `devices_serial_no=${encodeURIComponent(deviceId)}&` +
-          `date=${encodeURIComponent(date)}&` +
-          `shift=${encodeURIComponent(shiftParam)}&` +
-          `start_time=${encodeURIComponent(startTimeStr)}&` +
-          `end_time=${encodeURIComponent(endTimeStr)}&` +
-          `id=${encodeURIComponent(id)}&` +
-          `name=${encodeURIComponent(name)}&` +
-          `value=${encodeURIComponent(value)}&` +
-          `reading=${encodeURIComponent(reading)}`;
-        
-        console.log('📊 Fetching maintenance detail data from API:', apiUrl);
-        
-        const response = await fetch(apiUrl, {
-          headers: { 'Accept': 'application/json' },
-          cache: 'no-store',
-          mode: 'cors'
-        });
-        
-        if (!response.ok) {
-          throw new Error(`Failed to load data: ${response.status} ${response.statusText}`);
-        }
-        
-        const responseText = await response.text();
-        let json: any;
-        
-        try {
-          json = JSON.parse(responseText);
-        } catch (parseError) {
-          console.error('❌ Failed to parse response as JSON:', parseError);
-          throw new Error('Invalid JSON response from API');
-        }
-        
-        // Handle API response structure: { success: true, data: { data: [...], total_pages: 10, per_page: 5 } }
-        // The API returns paginated data with nested structure
-        let dataArray: any[] = [];
-        
-        if (json.success) {
-          // Check for nested data structure: { success: true, data: { data: [...] } }
-          if (json.data && json.data.data && Array.isArray(json.data.data)) {
-            // Format: { success: true, data: { data: [...], total_pages: 10, per_page: 5 } }
-            dataArray = json.data.data;
-            console.log('✅ Found paginated data structure:', {
-              total_pages: json.data.total_pages,
-              per_page: json.data.per_page,
-              items: dataArray.length
-            });
-          } else if (Array.isArray(json.data)) {
-            // Format: { success: true, data: [...] } (non-paginated)
-            dataArray = json.data;
-            console.log('✅ Found direct array in json.data');
-          } else if (Array.isArray(json)) {
-            // Format: [...] (direct array)
-            dataArray = json;
-            console.log('✅ Found direct array');
-          } else {
-            console.warn('⚠️ API response format unexpected:', json);
-            console.warn('⚠️ Expected array in json.data.data, json.data, or json itself');
-            setInstances([]);
-            return;
-          }
-          
-          const apiInstances: Instance[] = dataArray.map((item: any) => ({
-            time: String(item.time || ''),
-            value: Number(item.value || 0),
-            matched: Boolean(item.matched)
-          }));
-          
-          setInstances(apiInstances);
-          setCurrentPage(1); // Reset to first page
-          console.log('✅ Loaded', apiInstances.length, 'instances from API');
-        } else {
-          console.warn('⚠️ API response indicates failure:', json);
-          setInstances([]);
-        }
-      } catch (error: any) {
-        console.error('❌ Error loading maintenance detail data:', error);
-        // Fallback to mock data on error
-        const mockData = getMockInstances(outputName);
-        setInstances(mockData);
-        setCurrentPage(1);
+
+    try {
+      const startMs = Math.min(rangeStart.getTime(), rangeEnd.getTime());
+      const endMs = Math.max(rangeStart.getTime(), rangeEnd.getTime());
+      const start = new Date(startMs);
+      const end = new Date(endMs);
+
+      // Format start and end times for API (UTC format HH:mm:ss)
+      const formatTimeForAPI = (d: Date): string => {
+        const hours = String(d.getUTCHours()).padStart(2, '0');
+        const minutes = String(d.getUTCMinutes()).padStart(2, '0');
+        const seconds = String(d.getUTCSeconds()).padStart(2, '0');
+        return `${hours}:${minutes}:${seconds}`;
+      };
+
+      const shiftParam = formatShiftForAPI(shift);
+      const startTimeStr = formatTimeForAPI(start);
+      const endTimeStr = formatTimeForAPI(end);
+
+      // Build API URL
+      const apiUrl = `/reet_python/mccullochs/apis/get_data.php?` +
+        `devices_serial_no=${encodeURIComponent(deviceId)}&` +
+        `date=${encodeURIComponent(date)}&` +
+        `shift=${encodeURIComponent(shiftParam)}&` +
+        `start_time=${encodeURIComponent(startTimeStr)}&` +
+        `end_time=${encodeURIComponent(endTimeStr)}&` +
+        `id=${encodeURIComponent(id)}&` +
+        `name=${encodeURIComponent(name)}&` +
+        `value=${encodeURIComponent(value)}&` +
+        `reading=${encodeURIComponent(reading)}`;
+
+      console.log('📊 Fetching maintenance detail data from API:', apiUrl);
+
+      const response = await fetch(apiUrl, {
+        headers: { 'Accept': 'application/json' },
+        cache: 'no-store',
+        mode: 'cors'
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to load data: ${response.status} ${response.statusText}`);
       }
-    };
-    
-    loadData();
-  }, [outputName, searchParams, selectionStart, selectionEnd]);
+
+      const responseText = await response.text();
+      let json: any;
+
+      try {
+        json = JSON.parse(responseText);
+      } catch (parseError) {
+        console.error('❌ Failed to parse response as JSON:', parseError);
+        throw new Error('Invalid JSON response from API');
+      }
+
+      // Handle API response structure: { success: true, data: { data: [...], total_pages: 10, per_page: 5 } }
+      let dataArray: any[] = [];
+
+      if (json.success) {
+        if (json.data && json.data.data && Array.isArray(json.data.data)) {
+          dataArray = json.data.data;
+          console.log('✅ Found paginated data structure:', {
+            total_pages: json.data.total_pages,
+            per_page: json.data.per_page,
+            items: dataArray.length
+          });
+        } else if (Array.isArray(json.data)) {
+          dataArray = json.data;
+          console.log('✅ Found direct array in json.data');
+        } else if (Array.isArray(json)) {
+          dataArray = json;
+          console.log('✅ Found direct array');
+        } else {
+          console.warn('⚠️ API response format unexpected:', json);
+          console.warn('⚠️ Expected array in json.data.data, json.data, or json itself');
+          setInstances([]);
+          return;
+        }
+
+        const apiInstances: Instance[] = dataArray.map((item: any) => ({
+          time: String(item.time || ''),
+          value: Number(item.value || 0),
+          matched: Boolean(item.matched)
+        }));
+
+        setInstances(apiInstances);
+        setCurrentPage(1); // Reset to first page
+        console.log('✅ Loaded', apiInstances.length, 'instances from API');
+      } else {
+        console.warn('⚠️ API response indicates failure:', json);
+        setInstances([]);
+      }
+    } catch (error: any) {
+      console.error('❌ Error loading maintenance detail data:', error);
+      const mockData = getMockInstances(outputName);
+      setInstances(mockData);
+      setCurrentPage(1);
+    }
+  }, [outputName, deviceId, date, shift, id, name, value, reading]);
+
+  // Initial load + reload when URL filter params change (device/date/shift/etc). Selection dragging fetches via debounce in handleSelectionChange.
+  useEffect(() => {
+    if (!Number.isFinite(shiftDomain.startMs) || !Number.isFinite(shiftDomain.endMs) || shiftDomain.startMs >= shiftDomain.endMs) {
+      return;
+    }
+    loadDataForRange(new Date(shiftDomain.startMs), new Date(shiftDomain.endMs));
+  }, [shiftDomain.startMs, shiftDomain.endMs, loadDataForRange]);
 
   // REMOVED: screen-mode:changed listener that was causing redirects
   // We don't want to navigate away from the detail page when mode changes
@@ -190,19 +268,10 @@ const MaintenanceDetailPage: React.FC = () => {
   // Prepare scrubber data - per-second in second view mode, per-minute otherwise
   const scrubberData = useMemo(() => {
     // Always use minute-based timestamps (second view mode removed)
-    
-    // Default: per-minute resolution
-    // Prefer explicit selection range when available
-    const candidateStarts: number[] = [];
-    const candidateEnds: number[] = [];
-
-    if (selectionStart) candidateStarts.push(selectionStart.getTime());
-    if (selectionEnd) candidateEnds.push(selectionEnd.getTime());
-
-    if (candidateStarts.length === 0 || candidateEnds.length === 0) return [];
-
-    const startTs = Math.min(...candidateStarts);
-    const endTs = Math.max(...candidateEnds);
+    // IMPORTANT: Keep the scrubber domain fixed to the full shift range.
+    // SelectionStart/End should NOT affect the domain; otherwise the timeline "shrinks" while dragging.
+    const startTs = shiftDomain.startMs;
+    const endTs = shiftDomain.endMs;
     if (!Number.isFinite(startTs) || !Number.isFinite(endTs) || startTs >= endTs) return [];
 
     const data: Array<{ time: number }> = [];
@@ -212,7 +281,7 @@ const MaintenanceDetailPage: React.FC = () => {
     }
     if (data.length === 0 || data[data.length - 1].time !== endTs) data.push({ time: endTs });
     return data;
-  }, [selectionStart, selectionEnd]);
+  }, [shiftDomain.startMs, shiftDomain.endMs]);
 
   // Handle time change from scrubber with throttling for smooth performance
   const handleTimeChange = useCallback((timestamp: number) => {
@@ -244,42 +313,45 @@ const MaintenanceDetailPage: React.FC = () => {
 
   // Handle selection range change from scrubber
   const handleSelectionChange = useCallback((startTimestamp: number, endTimestamp: number) => {
-    const start = new Date(startTimestamp);
-    const end = new Date(endTimestamp);
-    
-    // In second view mode: enforce MIN 10 minutes range
-    // In minute view mode: enforce MIN 1 hour range
-    const minRangeMs = 60 * 60 * 1000; // Always 1 hour (minute view)
-    const rangeMs = endTimestamp - startTimestamp;
-    const newStart = start;
-    let newEnd = end;
-    if (rangeMs < minRangeMs) {
-      newEnd = new Date(startTimestamp + minRangeMs);
+    // Clamp and normalize timestamps
+    let startMs = Math.min(startTimestamp, endTimestamp);
+    let endMs = Math.max(startTimestamp, endTimestamp);
+
+    // Clamp to full-shift domain
+    const domainStart = shiftDomain.startMs;
+    const domainEnd = shiftDomain.endMs;
+    if (Number.isFinite(domainStart) && Number.isFinite(domainEnd) && domainStart < domainEnd) {
+      startMs = Math.max(domainStart, startMs);
+      endMs = Math.min(domainEnd, endMs);
     }
+
+    // Enforce minimum range (1 hour in minute view mode)
+    const minRangeMs = 60 * 60 * 1000;
+    if (endMs - startMs < minRangeMs) {
+      endMs = startMs + minRangeMs;
+      if (Number.isFinite(domainEnd) && endMs > domainEnd) {
+        endMs = domainEnd;
+        startMs = Math.max(Number.isFinite(domainStart) ? domainStart : startMs, endMs - minRangeMs);
+      }
+    }
+
+    const newStart = new Date(startMs);
+    const newEnd = new Date(endMs);
     setSelectionStart(newStart);
     setSelectionEnd(newEnd);
-    
-    // Preserve the selected time when dragging range bars
-    // Only clamp it if it goes outside the new range
-    setSelectedTime(prev => {
-      if (!prev) {
-        // If no previous time, set to center
-        return new Date((newStart.getTime() + newEnd.getTime()) / 2);
-      }
-      const prevTime = prev.getTime();
-      const newStartTime = newStart.getTime();
-      const newEndTime = newEnd.getTime();
-      
-      // Only update if the previous time is outside the new range
-      if (prevTime < newStartTime) {
-        return newStart;
-      } else if (prevTime > newEndTime) {
-        return newEnd;
-      }
-      // Keep the exact same time if it's still within range
-      return prev;
-    });
-  }, []); // Always use minute view settings
+    setCurrentPage(1);
+
+    // Match main Maintenance behavior: keep selected time centered within the selected range
+    setSelectedTime(new Date((startMs + endMs) / 2));
+
+    // Debounce API call to avoid too many requests while dragging
+    if (rangeChangeTimeoutRef.current) {
+      clearTimeout(rangeChangeTimeoutRef.current);
+    }
+    rangeChangeTimeoutRef.current = setTimeout(() => {
+      loadDataForRange(newStart, newEnd);
+    }, 500);
+  }, [shiftDomain.startMs, shiftDomain.endMs, loadDataForRange]); // Always use minute view settings
 
   // Handle hover from scrubber
   const handleHover = useCallback((_timestamp: number | null) => {
@@ -367,6 +439,7 @@ const MaintenanceDetailPage: React.FC = () => {
             onSelectionChange={handleSelectionChange}
             onHover={handleHover}
             isSecondViewMode={false}
+            showVehiclePointer={false}
           />
         )}
 
@@ -404,7 +477,7 @@ const MaintenanceDetailPage: React.FC = () => {
         </div>
 
         {/* Table */}
-        <div className={styles.tableContainer}>
+        <div id="maintenanceDetailTableContainer" className={styles.tableContainer}>
           <table className={styles.dataTable}>
             <thead>
               <tr>

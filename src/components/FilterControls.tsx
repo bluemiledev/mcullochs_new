@@ -419,6 +419,7 @@ const printChart = () => {
   const analogContainer = document.getElementById('analogChartsContainer');
   const drillingTableContainer = document.getElementById('drillingOperationsTable');
   const maintenanceTablesContainer = document.getElementById('maintenanceTablesContainer');
+  const maintenanceDetailTableContainer = document.getElementById('maintenanceDetailTableContainer');
 
   // Collect all canvas elements from both containers
   const canvases: HTMLCanvasElement[] = [];
@@ -434,6 +435,19 @@ const printChart = () => {
   const hasCharts = (digitalContainer && digitalContainer.children.length > 0) || 
                     (analogContainer && analogContainer.children.length > 0) ||
                     canvases.length > 0;
+  
+  // If in maintenance detail page (has detail table but no charts), only print detail table
+  if (maintenanceDetailTableContainer && !hasCharts && !drillingTableContainer && !maintenanceTablesContainer) {
+    convertTableToCanvas(maintenanceDetailTableContainer)
+      .then(tableCanvas => {
+        printWithCanvases([tableCanvas]);
+      })
+      .catch(error => {
+        console.error('Error converting maintenance detail table to canvas:', error);
+        alert("Error preparing table for printing!");
+      });
+    return;
+  }
   
   // If in maintenance mode (has tables but no charts), only print tables
   if (maintenanceTablesContainer && !hasCharts && !drillingTableContainer) {
@@ -662,6 +676,16 @@ const FilterControls: React.FC = () => {
   const [showCalendar, setShowCalendar] = useState<boolean>(false);
   const calendarRef = useRef<HTMLDivElement>(null);
   const [screenMode, setScreenMode] = useState<'Maintenance' | 'Drilling'>('Maintenance');
+  
+  // Check if we're on the maintenance detail page
+  const isMaintenanceDetailPage = location.pathname === '/maintenance-detail';
+  
+  // Lock screen mode to Maintenance on detail page
+  useEffect(() => {
+    if (isMaintenanceDetailPage && screenMode !== 'Maintenance') {
+      setScreenMode('Maintenance');
+    }
+  }, [isMaintenanceDetailPage, screenMode]);
 
   // Read URL parameters on mount to auto-select device and date
   useEffect(() => {
@@ -944,13 +968,8 @@ const FilterControls: React.FC = () => {
   // Dispatch event when vehicle, date, shift, or screen mode changes to trigger chart reload
   // Only dispatch if this is a user action, not initial load from URL
   useEffect(() => {
-    // Don't dispatch events if we're on the maintenance-detail page
-    // This prevents unwanted redirects when the detail page loads
     const currentPath = window.location.pathname;
-    if (currentPath === '/maintenance-detail') {
-      console.log('🚫 FilterControls: On maintenance-detail page, skipping event dispatch');
-      return;
-    }
+    const isOnDetailPage = currentPath === '/maintenance-detail';
     
     // Skip if we're initializing from URL params (to prevent auto-loading and hiding modal)
     if (isInitializingFromUrl.current) {
@@ -962,13 +981,21 @@ const FilterControls: React.FC = () => {
     }
     
     if (selectedVehicleId && selectedDate) {
-      // Update URL parameters
+      // Always update URL parameters (even on detail page, so it can react to changes)
       const params = new URLSearchParams(searchParams);
       params.set('device_id', selectedVehicleId);
       params.set('date', selectedDate);
       params.set('shift', selectedShift);
       params.set('reportType', screenMode);
       setSearchParams(params, { replace: true });
+      
+      // Only dispatch events if NOT on the maintenance-detail page
+      // This prevents unwanted redirects when the detail page loads
+      // But URL params are still updated so the detail page can react to them
+      if (isOnDetailPage) {
+        console.log('📋 FilterControls: On maintenance-detail page, updated URL params but skipping event dispatch');
+        return;
+      }
       
       console.log('📋 FilterControls: Dispatching filters:apply with:', {
         device_id: selectedVehicleId,
@@ -1114,9 +1141,10 @@ const FilterControls: React.FC = () => {
             className={styles.select}
             value={screenMode}
             onChange={(e) => handleScreenModeChange(e.target.value as 'Maintenance' | 'Drilling')}
+            disabled={isMaintenanceDetailPage}
           >
             <option value="Maintenance">Maintenance</option>
-            <option value="Drilling">Drilling</option>
+            {!isMaintenanceDetailPage && <option value="Drilling">Drilling</option>}
           </select>
           
           <select 
@@ -1128,14 +1156,16 @@ const FilterControls: React.FC = () => {
             <option value="6 PM to 6 AM">6 PM to 6 AM</option>
           </select>
           
-          <button 
-            className={styles.filterButton} 
-            onClick={() => {
-              window.dispatchEvent(new CustomEvent('filters:open'));
-            }}
-          >
-            Additional Filters
-          </button>
+          {!isMaintenanceDetailPage && (
+            <button 
+              className={styles.filterButton} 
+              onClick={() => {
+                window.dispatchEvent(new CustomEvent('filters:open'));
+              }}
+            >
+              Additional Filters
+            </button>
+          )}
         </div>
         
       
