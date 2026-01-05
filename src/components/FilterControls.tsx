@@ -1172,21 +1172,6 @@ const FilterControls: React.FC = () => {
         
         <div className={styles.rightControls}>
           <div className={styles.actionButtons}>
-            <button 
-              className={styles.actionBtn}
-              onClick={() => {
-                if (selectedVehicleId && selectedDate) {
-                  // Redirect to external Smart Data Link table report with exact current selection
-                  // selectedDate is kept in API format (YYYY-MM-DD)
-                  const externalUrl = `https://www.smartdatalink.com.au/table_report.php?reading_date=${encodeURIComponent(selectedDate)}&devices_serial_no=${encodeURIComponent(String(selectedVehicleId))}`;
-                  window.location.href = externalUrl;
-                } else {
-                  alert('Please select a vehicle and date first');
-                }
-              }}
-            >
-              Table
-            </button>
             <button
               className={styles.actionBtn}
               onClick={() => {

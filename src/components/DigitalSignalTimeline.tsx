@@ -219,10 +219,12 @@ const DigitalSignalTimeline: React.FC<DigitalSignalTimelineProps> = ({
   }, [signals, timeDomain]);
 
   const formatTime = (tickItem: number) => {
-    if (isSecondViewMode) {
-      return format(new Date(tickItem), 'HH:mm:ss');
-    }
-    return format(new Date(tickItem), 'HH:mm');
+    // Keep time formatting consistent with the TimeScrubber (UTC)
+    const d = new Date(tickItem);
+    const hh = String(d.getUTCHours()).padStart(2, '0');
+    const mm = String(d.getUTCMinutes()).padStart(2, '0');
+    const ss = String(d.getUTCSeconds()).padStart(2, '0');
+    return isSecondViewMode ? `${hh}:${mm}:${ss}` : `${hh}:${mm}`;
   };
 
   // Dynamic ticks based on data range: 30 minutes for 12 hours, 1 hour for 24 hours
@@ -486,8 +488,8 @@ const DigitalSignalTimeline: React.FC<DigitalSignalTimelineProps> = ({
           }}
         >
 {isSecondViewMode 
-          ? format(selectedTime, 'HH:mm:ss')
-          : `${format(new Date(Math.floor(selectedTime.getTime() / 60000) * 60000), 'HH:mm')}:00`}
+          ? formatTime(selectedTime.getTime())
+          : `${formatTime(Math.floor(selectedTime.getTime() / 60000) * 60000)}:00`}
         </div>
       )}
       <div className={styles.container}>

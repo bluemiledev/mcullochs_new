@@ -1462,16 +1462,24 @@ useEffect(() => {
                 timestamp = timeToTimestampMap.get(point.time)!;
               } else {
                 // Fallback: parse time string
-                const [hh, mm] = (point.time || '00:00:00').split(':').map(Number);
-                const baseDate = new Date(selectedDate);
-                baseDate.setHours(hh, mm, 0, 0);
+                const parts = String(point.time || '00:00:00').split(':');
+                const hh = Number(parts[0] || 0);
+                const mm = Number(parts[1] || 0);
+                const ss = Number(parts[2] || 0);
+                // Use a base date derived from the actual data timestamps to avoid timezone drift
+                const baseDate = new Date(processedTimestamps[0] ?? Date.now());
+                baseDate.setUTCHours(hh, mm, ss, 0);
                 timestamp = baseDate.getTime();
               }
               times.push(timestamp);
               
-              values.push(point.avg != null ? point.avg : null);
-              mins.push(point.min != null ? point.min : null);
-              maxs.push(point.max != null ? point.max : null);
+              // New drilling API often returns `value` (not `avg`). Treat value as avg when avg is missing.
+              const avg = point.avg ?? point.value ?? point.val ?? null;
+              const min = point.min ?? point.avg ?? point.value ?? point.val ?? null;
+              const max = point.max ?? point.avg ?? point.value ?? point.val ?? null;
+              values.push(avg === '' ? null : avg);
+              mins.push(min === '' ? null : min);
+              maxs.push(max === '' ? null : max);
             });
             
             // Preserve all series properties including min_color, max_color, and yAxisRange
@@ -1566,8 +1574,9 @@ useEffect(() => {
           });
         }
         
-        // Filter by hour range if selected
-        if (selectedHourRange) {
+        // Filter by hour range if selected (only for maintenance mode, not drilling)
+        // In drilling mode, show all data and let charts filter by timeDomain
+        if (selectedHourRange && screenMode === 'Maintenance') {
           const filterByTimeRange = (items: any[], timeField: string) => {
             return items.map((item: any) => {
               if (Array.isArray(item.points)) {
@@ -1598,6 +1607,8 @@ useEffect(() => {
           };
           
           console.log('🔍 Filtered data by hour range:', selectedHourRange.start, 'to', selectedHourRange.end);
+        } else if (screenMode === 'Drilling') {
+          console.log('📊 Drilling mode: Not filtering by hour range - showing all data');
         }
         
         console.log('✅ Converted per-second data to per-minute format');
@@ -1842,7 +1853,12 @@ useEffect(() => {
         // Create series mapping function that uses exact API values and aligned timestamps
         // Skip data points with null/invalid values so line doesn't render at missing time points
         const toSeries = (values: (number | null)[], timestamps?: number[]): Array<{ time: Date; value: number }> => {
-          const usedTimes = timestamps || times;
+          // Use provided timestamps, or fallback to processedTimestamps or rawTimestamps
+          const usedTimes = timestamps || (processedTimestamps.length > 0 ? processedTimestamps : rawTimestamps);
+          if (!usedTimes || usedTimes.length === 0) {
+            console.warn('⚠️ No timestamps available for toSeries');
+            return [];
+          }
           const points = values
             .map((v: number | null, idx: number) => {
               const timestamp = usedTimes[idx];
@@ -1870,7 +1886,12 @@ useEffect(() => {
           maxVals?: (number | null)[] | null,
           timestamps?: number[]
         ): Array<{ time: Date; avg: number; min: number | null; max: number | null }> => {
-          const usedTimes = timestamps || times;
+          // Use provided timestamps, or fallback to processedTimestamps or rawTimestamps
+          const usedTimes = timestamps || (processedTimestamps.length > 0 ? processedTimestamps : rawTimestamps);
+          if (!usedTimes || usedTimes.length === 0) {
+            console.warn('⚠️ No timestamps available for toSeriesTriplet');
+            return [];
+          }
           const validPoints: Array<{ time: Date; avg: number; min: number | null; max: number | null }> = [];
           
           avgVals.forEach((v: number | null, idx: number) => {
@@ -2062,17 +2083,46 @@ useEffect(() => {
             // Convert string times to timestamps
             signalTimes = signalTimes.map((t: string) => Date.parse(t));
           }
+          // If no signal-specific times, use processedTimestamps or rawTimestamps from state
           if (!signalTimes.length) {
-            signalTimes = times;
+            // Use processedTimestamps if available (from current load), otherwise fallback to rawTimestamps from state
+            signalTimes = processedTimestamps.length > 0 ? processedTimestamps : rawTimestamps;
           }
-          const normalizedSignalTimes = Array.isArray(signalTimes)
+          const normalizedSignalTimes = Array.isArray(signalTimes) && signalTimes.length > 0
             ? signalTimes.map(parseTimestampToMs).filter((n: number) => Number.isFinite(n)).map(alignToMinute).sort((a: number, b: number) => a - b)
-            : times;
+            : (processedTimestamps.length > 0 ? processedTimestamps : rawTimestamps);
           
           // Create data points with exact API values, aligned timestamps, and sorted
+          console.log(`📊 Creating data points for ${s.id || s.name}:`, {
+            avgRawLength: avgRaw.length,
+            minsRawLength: minsRaw?.length || 0,
+            maxsRawLength: maxsRaw?.length || 0,
+            normalizedSignalTimesLength: normalizedSignalTimes.length,
+            firstTime: normalizedSignalTimes[0] ? new Date(normalizedSignalTimes[0]).toISOString() : 'N/A',
+            lastTime: normalizedSignalTimes[normalizedSignalTimes.length - 1] ? new Date(normalizedSignalTimes[normalizedSignalTimes.length - 1]).toISOString() : 'N/A'
+          });
           const data = (minsRaw || maxsRaw) 
             ? toSeriesTriplet(avgRaw, minsRaw, maxsRaw, normalizedSignalTimes)
             : toSeries(avgRaw, normalizedSignalTimes);
+          // Helper function to safely extract value from data point
+          const getValue = (point: { time: Date; value?: number; avg?: number; min?: number | null; max?: number | null }): number | null => {
+            if ('avg' in point && point.avg != null) return point.avg;
+            if ('value' in point && point.value != null) return point.value;
+            return null;
+          };
+          
+          const firstPoint = data[0];
+          const lastPoint = data[data.length - 1];
+          console.log(`✅ Created ${data.length} data points for ${s.id || s.name}`, {
+            firstPoint: firstPoint ? { 
+              time: firstPoint.time.toISOString(), 
+              value: getValue(firstPoint)
+            } : 'N/A',
+            lastPoint: lastPoint ? { 
+              time: lastPoint.time.toISOString(), 
+              value: getValue(lastPoint)
+            } : 'N/A'
+          });
           
           // Calculate stats from actual data points - use API data directly with time matching
           // Filter out invalid data points (NaN, null, undefined) before calculating
@@ -2219,7 +2269,7 @@ useEffect(() => {
           const parseHMS = (hms: string) => {
             const [hh, mm, ss] = String(hms).split(':').map((n: string) => Number(n));
             const base = new Date(times[0] ?? Date.now());
-            base.setHours(0, 0, 0, 0);
+            base.setUTCHours(0, 0, 0, 0);
             const timestamp = base.getTime() + hh * 3600000 + mm * 60000 + ss * 1000;
             // Align to minute boundary
             return new Date(alignToMinute(timestamp));
@@ -2304,7 +2354,7 @@ useEffect(() => {
           const parseHMS = (hms: string) => {
             const [hh, mm, ss] = String(hms).split(':').map((n: string) => Number(n));
             const base = new Date(times[0] ?? Date.now());
-            base.setHours(0, 0, 0, 0);
+            base.setUTCHours(0, 0, 0, 0);
             const timestamp = base.getTime() + hh * 3600000 + mm * 60000 + ss * 1000;
             // Align to minute boundary
             return new Date(alignToMinute(timestamp));
@@ -2350,10 +2400,13 @@ useEffect(() => {
             // Use null for missing avg/min/max values so line doesn't connect through missing data
             const rawPts = (series.points || []).map((r: any) => {
               const time = parseHMS(r.time);
-              // If avg is missing, use null; if min/max are missing, use null or avg if available
-              const avgRaw = r.avg !== null && r.avg !== undefined ? Number(r.avg) : null;
-              const minRaw = r.min !== null && r.min !== undefined ? Number(r.min) : (r.avg !== null && r.avg !== undefined ? Number(r.avg) : null);
-              const maxRaw = r.max !== null && r.max !== undefined ? Number(r.max) : (r.avg !== null && r.avg !== undefined ? Number(r.avg) : null);
+              // New drilling API often returns `value` (not `avg`). Treat value as avg when avg is missing.
+              const avgCandidate = r.avg ?? r.value ?? r.val;
+              const minCandidate = r.min ?? r.value ?? r.avg ?? r.val;
+              const maxCandidate = r.max ?? r.value ?? r.avg ?? r.val;
+              const avgRaw = avgCandidate !== null && avgCandidate !== undefined && avgCandidate !== '' ? Number(avgCandidate) : null;
+              const minRaw = minCandidate !== null && minCandidate !== undefined && minCandidate !== '' ? Number(minCandidate) : null;
+              const maxRaw = maxCandidate !== null && maxCandidate !== undefined && maxCandidate !== '' ? Number(maxCandidate) : null;
               
               // Apply transformation to avg, min, max
               const avg = applyTransformation(avgRaw);
@@ -2453,16 +2506,32 @@ useEffect(() => {
           analogMetrics.length = 0;
           console.group('📊 Analog Per-Minute Data - API Response');
           console.log('Number of analog per-minute series:', (payload.analogPerMinute as Array<any>).length);
+          let parseHMSCallCount = 0;
           const parseHMS = (hms: string) => {
             const parts = String(hms).split(':');
             const hh = Number(parts[0] || 0);
             const mm = Number(parts[1] || 0);
             const ss = Number(parts[2] || 0);
-            const base = new Date(times[0] ?? Date.now());
-            base.setHours(0, 0, 0, 0);
+            // Use a base date derived from the actual data timestamps to avoid timezone drift
+            const base = new Date((times[0] ?? processedTimestamps[0] ?? rawTimestamps[0] ?? Date.now()));
+            base.setUTCHours(0, 0, 0, 0);
             const timestamp = base.getTime() + hh * 3600000 + mm * 60000 + ss * 1000;
             // Align to minute boundary
-            return new Date(alignToMinute(timestamp));
+            const result = new Date(alignToMinute(timestamp));
+            
+            // 🔍 DEBUG: Log time parsing (only for first few calls to avoid spam)
+            parseHMSCallCount++;
+            if (parseHMSCallCount <= 3) {
+              console.log(`🔍 parseHMS: "${hms}" -> ${result.toISOString()}`, {
+                input: hms,
+                parts: { hh, mm, ss },
+                baseDate: base.toISOString(),
+                timestamp,
+                result: result.toISOString()
+              });
+            }
+            
+            return result;
           };
           (payload.analogPerMinute as Array<any>)
             .filter((series: any) => {
@@ -2504,6 +2573,19 @@ useEffect(() => {
             
             // Check if points is null, undefined, or empty
             const pointsData = series.points;
+            
+            // 🔍 DEBUG: Log raw points data from API
+            console.log(`🔍 [${series.id || series.name}] Raw points data from API:`, {
+              pointsCount: Array.isArray(pointsData) ? pointsData.length : 'not an array',
+              pointsType: typeof pointsData,
+              isNull: pointsData === null,
+              isUndefined: pointsData === undefined,
+              isEmpty: Array.isArray(pointsData) && pointsData.length === 0,
+              firstPoint: Array.isArray(pointsData) && pointsData.length > 0 ? pointsData[0] : null,
+              lastPoint: Array.isArray(pointsData) && pointsData.length > 0 ? pointsData[pointsData.length - 1] : null,
+              samplePoints: Array.isArray(pointsData) ? pointsData.slice(0, 5) : null
+            });
+            
             if (!pointsData || (Array.isArray(pointsData) && pointsData.length === 0)) {
               console.warn(`⚠️ Series ${series.id || series.name} has no points data (points is ${pointsData === null ? 'null' : pointsData === undefined ? 'undefined' : 'empty array'}), skipping`);
               console.groupEnd();
@@ -2545,9 +2627,13 @@ useEffect(() => {
                     return null;
                   }
                 }
-                avgRaw = r.avg !== null && r.avg !== undefined ? Number(r.avg) : null;
-                minRaw = r.min !== null && r.min !== undefined ? Number(r.min) : (r.avg !== null && r.avg !== undefined ? Number(r.avg) : null);
-                maxRaw = r.max !== null && r.max !== undefined ? Number(r.max) : (r.avg !== null && r.avg !== undefined ? Number(r.avg) : null);
+                // New drilling API often returns `value` (not `avg`). Treat value as avg when avg is missing.
+                const avgCandidate = (r as any).avg ?? (r as any).value ?? (r as any).val;
+                const minCandidate = (r as any).min ?? (r as any).value ?? (r as any).avg ?? (r as any).val;
+                const maxCandidate = (r as any).max ?? (r as any).value ?? (r as any).avg ?? (r as any).val;
+                avgRaw = avgCandidate !== null && avgCandidate !== undefined && avgCandidate !== '' ? Number(avgCandidate) : null;
+                minRaw = minCandidate !== null && minCandidate !== undefined && minCandidate !== '' ? Number(minCandidate) : null;
+                maxRaw = maxCandidate !== null && maxCandidate !== undefined && maxCandidate !== '' ? Number(maxCandidate) : null;
               } else {
                 console.warn(`⚠️ Unexpected point format, skipping:`, r);
                 return null;
@@ -2569,6 +2655,32 @@ useEffect(() => {
             
             // Sort by timestamp
             rawPts.sort((a, b) => a.time.getTime() - b.time.getTime());
+            
+            // 🔍 DEBUG: Log processed points data
+            console.log(`🔍 [${series.id || series.name}] Processed points data:`, {
+              processedPointsCount: rawPts.length,
+              firstProcessedPoint: rawPts.length > 0 ? {
+                time: rawPts[0].time.toISOString(),
+                avg: rawPts[0].avg,
+                min: rawPts[0].min,
+                max: rawPts[0].max
+              } : null,
+              lastProcessedPoint: rawPts.length > 0 ? {
+                time: rawPts[rawPts.length - 1].time.toISOString(),
+                avg: rawPts[rawPts.length - 1].avg,
+                min: rawPts[rawPts.length - 1].min,
+                max: rawPts[rawPts.length - 1].max
+              } : null,
+              sampleProcessedPoints: rawPts.slice(0, 5).map(p => ({
+                time: p.time.toISOString(),
+                avg: p.avg,
+                min: p.min,
+                max: p.max
+              })),
+              pointsWithValidAvg: rawPts.filter(p => p.avg != null && Number.isFinite(p.avg)).length,
+              pointsWithValidMin: rawPts.filter(p => p.min != null && Number.isFinite(p.min)).length,
+              pointsWithValidMax: rawPts.filter(p => p.max != null && Number.isFinite(p.max)).length
+            });
             
             if (!rawPts.length) {
               console.warn(`⚠️ No valid points in series ${series.id || series.name} after processing, skipping`);
@@ -2599,7 +2711,18 @@ useEffect(() => {
             console.log('Resolution:', resolution, 'Offset:', offset);
             console.log('Processed Points Count:', rawPts.length);
             console.log('Calculated Stats (after transformation):', { avg: safeAvg, min: safeMin, max: safeMax });
-            console.log('First 3 points (after transformation):', rawPts.slice(0, 3));
+            console.log('First 3 points (after transformation):', rawPts.slice(0, 3).map(p => ({
+              time: p.time.toISOString(),
+              avg: p.avg,
+              min: p.min,
+              max: p.max
+            })));
+            console.log('Last 3 points (after transformation):', rawPts.slice(-3).map(p => ({
+              time: p.time.toISOString(),
+              avg: p.avg,
+              min: p.min,
+              max: p.max
+            })));
             console.groupEnd();
             
             const metric = {
@@ -2617,13 +2740,30 @@ useEffect(() => {
               yAxisRange: usedRange
             };
             
-            // Debug: Log what we're setting
-            console.log('✅ Metric being created:', {
+            // 🔍 DEBUG: Log complete metric being created
+            console.log(`✅ [${series.id || series.name}] Metric being created:`, {
               id: metric.id,
+              name: metric.name,
+              unit: metric.unit,
+              color: metric.color,
               min_color: metric.min_color,
               max_color: metric.max_color,
               hasMinColor: !!metric.min_color,
-              hasMaxColor: !!metric.max_color
+              hasMaxColor: !!metric.max_color,
+              dataPointsCount: metric.data.length,
+              yAxisRange: metric.yAxisRange,
+              stats: {
+                avg: metric.avg,
+                min: metric.min,
+                max: metric.max,
+                currentValue: metric.currentValue
+              },
+              firstDataPoint: metric.data.length > 0 ? {
+                time: metric.data[0].time?.toISOString?.() || metric.data[0].time,
+                avg: metric.data[0].avg,
+                min: metric.data[0].min,
+                max: metric.data[0].max
+              } : null
             });
             
             analogMetrics.push(metric);
@@ -3381,12 +3521,24 @@ useEffect(() => {
               }
               return filtered;
             })().map(metric => {
-              // Debug: Log what we're passing to AnalogChart
-              console.log(`📤 Passing to AnalogChart ${metric.id}:`, {
+              // 🔍 DEBUG: Log what we're passing to AnalogChart during render
+              console.log(`📤 Rendering AnalogChart [${metric.id}]:`, {
+                id: metric.id,
+                name: metric.name,
+                dataPointsCount: metric.data?.length || 0,
+                dataType: Array.isArray(metric.data) ? 'array' : typeof metric.data,
+                firstDataPoint: metric.data && metric.data.length > 0 ? {
+                  time: metric.data[0].time,
+                  avg: metric.data[0].avg,
+                  min: metric.data[0].min,
+                  max: metric.data[0].max
+                } : null,
                 min_color: metric.min_color,
                 max_color: metric.max_color,
                 hasMinColor: !!metric.min_color,
-                hasMaxColor: !!metric.max_color
+                hasMaxColor: !!metric.max_color,
+                yAxisRange: metric.yAxisRange,
+                timeDomain
               });
               
               return (

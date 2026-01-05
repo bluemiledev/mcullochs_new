@@ -10,8 +10,14 @@ import {
   ResponsiveContainer,
   Cell,
 } from 'recharts';
-import { format } from 'date-fns';
 import styles from './AnalogChart.module.css';
+
+const formatHmsUTC = (d: Date) => {
+  const hh = String(d.getUTCHours()).padStart(2, '0');
+  const mm = String(d.getUTCMinutes()).padStart(2, '0');
+  const ss = String(d.getUTCSeconds()).padStart(2, '0');
+  return `${hh}:${mm}:${ss}`;
+};
 
 interface AnalogChartProps {
   id: string;
@@ -44,6 +50,42 @@ const AnalogChart: React.FC<AnalogChartProps> = ({
   perSecondStats,
   isSecondViewMode = false,
 }) => {
+  // 🔍 DEBUG: Log data received by AnalogChart component
+  React.useEffect(() => {
+    console.log(`🔍 AnalogChart [${id}] received data:`, {
+      id,
+      name,
+      dataPointsCount: data?.length || 0,
+      dataType: Array.isArray(data) ? 'array' : typeof data,
+      firstDataPoint: data && data.length > 0 ? {
+        time: data[0].time,
+        avg: data[0].avg,
+        min: data[0].min,
+        max: data[0].max,
+        timeType: typeof data[0].time,
+        timeValue: data[0].time instanceof Date ? data[0].time.toISOString() : data[0].time
+      } : null,
+      lastDataPoint: data && data.length > 0 ? {
+        time: data[data.length - 1].time,
+        avg: data[data.length - 1].avg,
+        min: data[data.length - 1].min,
+        max: data[data.length - 1].max,
+        timeType: typeof data[data.length - 1].time,
+        timeValue: data[data.length - 1].time instanceof Date ? data[data.length - 1].time.toISOString() : data[data.length - 1].time
+      } : null,
+      sampleDataPoints: data && data.length > 0 ? data.slice(0, 3).map((d: any) => ({
+        time: d.time instanceof Date ? d.time.toISOString() : d.time,
+        avg: d.avg,
+        min: d.min,
+        max: d.max
+      })) : null,
+      yAxisRange,
+      color,
+      min_color,
+      max_color
+    });
+  }, [id, name, data, yAxisRange, color, min_color, max_color]);
+
   const chartData = useMemo(() => {
     // Type for chart data points
     type ChartPoint = {
@@ -90,16 +132,70 @@ const AnalogChart: React.FC<AnalogChartProps> = ({
     // Filter to visible domain with small padding to avoid gaps at edges
     const PAD = 5 * 60 * 1000; // 5 min pad
     const filtered: ChartPoint[] = (() => {
-      if (!timeDomain) return data.map(toPoint);
+      if (!timeDomain) {
+        const allPoints = data.map(toPoint);
+        console.log(`🔍 AnalogChart [${id}] No timeDomain - using all ${allPoints.length} points`);
+        return allPoints;
+      }
       const [start, end] = timeDomain;
       const lo = start - PAD;
       const hi = end + PAD;
-      return data
+      
+      // 🔍 DEBUG: Log timeDomain and data time range
+      const dataTimeRange = data.length > 0 ? {
+        first: data[0].time.getTime(),
+        last: data[data.length - 1].time.getTime(),
+        firstISO: data[0].time.toISOString(),
+        lastISO: data[data.length - 1].time.toISOString()
+      } : null;
+      
+      console.log(`🔍 AnalogChart [${id}] Filtering with timeDomain:`, {
+        timeDomainStart: new Date(start).toISOString(),
+        timeDomainEnd: new Date(end).toISOString(),
+        timeDomainStartTs: start,
+        timeDomainEndTs: end,
+        filterLo: new Date(lo).toISOString(),
+        filterHi: new Date(hi).toISOString(),
+        dataTimeRange,
+        totalDataPoints: data.length
+      });
+      
+      const filteredData = data
         .filter((d: any) => {
           const t = d.time.getTime();
-          return t >= lo && t <= hi;
+          const inRange = t >= lo && t <= hi;
+          if (!inRange && data.indexOf(d) < 3) {
+            console.log(`🔍 Point filtered out:`, {
+              time: d.time.toISOString(),
+              timestamp: t,
+              lo: new Date(lo).toISOString(),
+              hi: new Date(hi).toISOString(),
+              inRange: false
+            });
+          }
+          return inRange;
         })
         .map(toPoint);
+      
+      console.log(`🔍 AnalogChart [${id}] Filtered result:`, {
+        originalCount: data.length,
+        filteredCount: filteredData.length,
+        firstFiltered: filteredData.length > 0 ? {
+          time: new Date(filteredData[0].time).toISOString(),
+          avg: filteredData[0].avg
+        } : null
+      });
+      
+      // 🔍 FIX: If filtering removed all data, fall back to showing all data
+      // This can happen if timeDomain doesn't match the data timezone/range
+      if (filteredData.length === 0 && data.length > 0) {
+        console.warn(`⚠️ AnalogChart [${id}] Filtering removed all ${data.length} data points! Falling back to showing all data.`);
+        console.warn(`⚠️ This suggests a timeDomain mismatch. TimeDomain: ${new Date(start).toISOString()} to ${new Date(end).toISOString()}, Data range: ${dataTimeRange?.firstISO} to ${dataTimeRange?.lastISO}`);
+        // Return all data points instead of empty array
+        return data.map(toPoint);
+      }
+      
+      return filteredData;
     })();
 
     // Keep null points in the data so Recharts can break the line at missing time points
@@ -174,8 +270,46 @@ const AnalogChart: React.FC<AnalogChartProps> = ({
     }
     
     // Sort by time to ensure proper order after inserting gap points
-    return withGaps.sort((a, b) => a.time - b.time);
-  }, [data, timeDomain]);
+    const sortedData = withGaps.sort((a, b) => a.time - b.time);
+    
+    // 🔍 DEBUG: Log chartData after processing
+    const validAvgPoints = sortedData.filter(d => d.avg != null && Number.isFinite(d.avg)).length;
+    console.log(`🔍 AnalogChart [${id}] chartData after processing:`, {
+      id,
+      name,
+      chartDataPointsCount: sortedData.length,
+      validAvgPoints,
+      firstChartPoint: sortedData.length > 0 ? {
+        time: new Date(sortedData[0].time).toISOString(),
+        avg: sortedData[0].avg,
+        min: sortedData[0].min,
+        max: sortedData[0].max
+      } : null,
+      lastChartPoint: sortedData.length > 0 ? {
+        time: new Date(sortedData[sortedData.length - 1].time).toISOString(),
+        avg: sortedData[sortedData.length - 1].avg,
+        min: sortedData[sortedData.length - 1].min,
+        max: sortedData[sortedData.length - 1].max
+      } : null,
+      pointsWithValidAvg: validAvgPoints,
+      pointsWithValidMin: sortedData.filter(d => d.min != null && Number.isFinite(d.min)).length,
+      pointsWithValidMax: sortedData.filter(d => d.max != null && Number.isFinite(d.max)).length,
+      sampleChartPoints: sortedData.slice(0, 5).map(d => ({
+        time: new Date(d.time).toISOString(),
+        avg: d.avg,
+        min: d.min,
+        max: d.max
+      }))
+    });
+    
+    // 🔍 WARNING: If we have no valid avg points, the line won't render
+    if (sortedData.length > 0 && validAvgPoints === 0) {
+      console.error(`❌ AnalogChart [${id}] WARNING: chartData has ${sortedData.length} points but NONE have valid avg values! Line will not render.`);
+      console.error(`❌ Sample points:`, sortedData.slice(0, 3));
+    }
+    
+    return sortedData;
+  }, [data, timeDomain, id, name]);
 
   // Debug: Log if colors are provided and check shadow data
   React.useEffect(() => {
@@ -203,7 +337,7 @@ const AnalogChart: React.FC<AnalogChartProps> = ({
   const perSecondMap = useMemo(() => {
     const map = new Map<string, { avg: number; min: number; max: number }>();
     (data as any[]).forEach((d: any) => {
-      const key = (d.hms as string) || format(d.time, 'HH:mm:ss');
+      const key = (d.hms as string) || formatHmsUTC(d.time);
       const avg = Number(d.rawAvg ?? d.avg ?? d.value);
       const minSource = d.rawMin ?? d.min ?? d.value;
       const maxSource = d.rawMax ?? d.max ?? d.value;
@@ -221,10 +355,12 @@ const AnalogChart: React.FC<AnalogChartProps> = ({
   }, [data]);
 
   const formatTime = (tick: number) => {
-    if (isSecondViewMode) {
-      return format(new Date(tick), 'HH:mm:ss');
-    }
-    return format(new Date(tick), 'HH:mm');
+    // Keep time formatting consistent with the TimeScrubber (UTC)
+    const d = new Date(tick);
+    const hh = String(d.getUTCHours()).padStart(2, '0');
+    const mm = String(d.getUTCMinutes()).padStart(2, '0');
+    const ss = String(d.getUTCSeconds()).padStart(2, '0');
+    return isSecondViewMode ? `${hh}:${mm}:${ss}` : `${hh}:${mm}`;
   };
 
   const formatYAxisLabel = (value: number) => {
@@ -234,10 +370,12 @@ const AnalogChart: React.FC<AnalogChartProps> = ({
   const getPointAtTime = (time: Date | null): { time: number; avg: number; min: number; max: number } | null => {
     if (!time || chartData.length === 0) return null;
     const timestamp = time.getTime();
+    const alignedTimestamp = isSecondViewMode ? timestamp : Math.floor(timestamp / 60000) * 60000;
 
     // Prefer exact per-second values when available from original data
     if (perSecondMap.size > 0) {
-      const key = format(time, 'HH:mm:ss');
+      const keyTime = isSecondViewMode ? time : new Date(alignedTimestamp);
+      const key = formatHmsUTC(keyTime);
       const hit = perSecondMap.get(key);
       if (hit) {
         const avg = Number.isFinite(hit.avg) && !isNaN(hit.avg) ? hit.avg : 0;
@@ -245,12 +383,11 @@ const AnalogChart: React.FC<AnalogChartProps> = ({
         const max = Number.isFinite(hit.max) && !isNaN(hit.max) ? hit.max : 0;
         return { time: time.getTime(), avg, min, max };
       }
-      // If perSecondMap exists but no exact match, data is missing - return 0
-      return { time: time.getTime(), avg: 0, min: 0, max: 0 };
+      // If perSecondMap exists but no exact match, fall back to chartData matching.
     }
 
     // Look for exact match first
-    const exactMatch = chartData.find((p: any) => p.time === timestamp);
+    const exactMatch = chartData.find((p: any) => p.time === alignedTimestamp);
     if (exactMatch) {
       const c: any = exactMatch;
       const avg: number = Number.isFinite(Number(c.avg)) && !isNaN(Number(c.avg)) ? Number(c.avg) : 0;
@@ -261,10 +398,10 @@ const AnalogChart: React.FC<AnalogChartProps> = ({
 
     // If no exact match, find closest point but only use it if very close (within 30 seconds)
     let closest = chartData[0];
-    let minDiff = Math.abs(closest.time - timestamp);
+    let minDiff = Math.abs(closest.time - alignedTimestamp);
 
     for (const point of chartData) {
-      const diff = Math.abs(point.time - timestamp);
+      const diff = Math.abs(point.time - alignedTimestamp);
       if (diff < minDiff) {
         minDiff = diff;
         closest = point as any;
@@ -276,7 +413,7 @@ const AnalogChart: React.FC<AnalogChartProps> = ({
     const tolerance = 30 * 1000; // 30 seconds
     if (minDiff > tolerance) {
       // Data is missing for this time point - return 0
-      return { time: timestamp, avg: 0, min: 0, max: 0 };
+      return { time: alignedTimestamp, avg: 0, min: 0, max: 0 };
     }
 
     // Use closest point if within tolerance
@@ -366,13 +503,41 @@ const AnalogChart: React.FC<AnalogChartProps> = ({
   }, [data, timeDomain]);
 
   const xDomain = useMemo(() => {
-    if (!chartData.length) return ['dataMin', 'dataMax'] as const;
+    // 🔍 DEBUG: Log xDomain calculation
+    console.log(`🔍 AnalogChart [${id}] xDomain calculation:`, {
+      chartDataLength: chartData.length,
+      timeDomain: timeDomain ? {
+        start: new Date(timeDomain[0]).toISOString(),
+        end: new Date(timeDomain[1]).toISOString()
+      } : null,
+      hasChartData: chartData.length > 0
+    });
+    
+    if (!chartData.length) {
+      console.warn(`⚠️ AnalogChart [${id}] chartData is empty! Cannot render chart.`);
+      // If no chart data, try to use timeDomain or fallback to dataMin/dataMax
+      if (timeDomain) {
+        return timeDomain as [number, number];
+      }
+      return ['dataMin', 'dataMax'] as const;
+    }
     const dataMin = chartData[0].time;
     const dataMax = chartData[chartData.length - 1].time;
-    if (!timeDomain) return ['dataMin', 'dataMax'] as const;
+    if (!timeDomain) {
+      console.log(`🔍 AnalogChart [${id}] No timeDomain, using data range:`, {
+        dataMin: new Date(dataMin).toISOString(),
+        dataMax: new Date(dataMax).toISOString()
+      });
+      return ['dataMin', 'dataMax'] as const;
+    }
     const hasAny = chartData.some(d => d.time >= timeDomain[0] && d.time <= timeDomain[1]);
-    return hasAny ? (timeDomain as [number, number]) : ([dataMin, dataMax] as [number, number]);
-  }, [chartData, timeDomain]);
+    const result = hasAny ? (timeDomain as [number, number]) : ([dataMin, dataMax] as [number, number]);
+    console.log(`🔍 AnalogChart [${id}] xDomain result:`, {
+      hasAny,
+      result: result.map((t: number) => new Date(t).toISOString())
+    });
+    return result;
+  }, [chartData, timeDomain, id]);
 
   // Dynamic ticks based on data range: 30 minutes for 12 hours, 1 hour for 24 hours
   const ticks = useMemo(() => {
@@ -442,6 +607,29 @@ const AnalogChart: React.FC<AnalogChartProps> = ({
     const x = chartLeftOffset + (innerWidth * Math.max(0, Math.min(1, percent)));
     return x;
   }, [selectedTime, timeDomain, containerWidth]);
+
+  // 🔍 DEBUG: Log final chartData before rendering
+  React.useEffect(() => {
+    console.log(`🔍 AnalogChart [${id}] Final chartData before render:`, {
+      chartDataLength: chartData.length,
+      hasData: chartData.length > 0,
+      firstPoint: chartData.length > 0 ? {
+        time: new Date(chartData[0].time).toISOString(),
+        avg: chartData[0].avg,
+        min: chartData[0].min,
+        max: chartData[0].max
+      } : null,
+      pointsWithValidAvg: chartData.filter(d => d.avg != null && Number.isFinite(d.avg)).length,
+      xDomain,
+      willRender: chartData.length > 0
+    });
+    
+    if (chartData.length === 0) {
+      console.error(`❌ AnalogChart [${id}] Cannot render - chartData is empty!`);
+    } else if (chartData.filter(d => d.avg != null && Number.isFinite(d.avg)).length === 0) {
+      console.error(`❌ AnalogChart [${id}] Cannot render - no valid avg values in chartData!`);
+    }
+  }, [chartData, id, xDomain]);
 
   return (
     <div className={styles.container} ref={containerRef}>
@@ -547,8 +735,8 @@ const AnalogChart: React.FC<AnalogChartProps> = ({
             }}
           >
             {isSecondViewMode 
-              ? format(selectedTime, 'HH:mm:ss')
-              : `${format(new Date(Math.floor(selectedTime.getTime() / 60000) * 60000), 'HH:mm')}:00`}
+              ? formatTime(selectedTime.getTime())
+              : `${formatTime(Math.floor(selectedTime.getTime() / 60000) * 60000)}:00`}
           </div>
         )}
       </div>
