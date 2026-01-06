@@ -687,21 +687,28 @@ const FilterControls: React.FC = () => {
     }
   }, [isMaintenanceDetailPage, screenMode]);
 
-  // Read URL parameters on mount to auto-select device and date
+  // Read URL parameters on mount to auto-select device, date, and shift
   useEffect(() => {
     const urlDeviceId = searchParams.get('device_id') || searchParams.get('vehicle');
     const urlDate = searchParams.get('date');
+    const urlShift = searchParams.get('shift');
     
     if (urlDeviceId && urlDate) {
-      console.log('📋 FilterControls: Auto-selecting from URL params - deviceId:', urlDeviceId, 'date:', urlDate);
+      console.log('📋 FilterControls: Auto-selecting from URL params - deviceId:', urlDeviceId, 'date:', urlDate, 'shift:', urlShift);
       isInitializingFromUrl.current = true; // Set flag to prevent auto-dispatch
       setSelectedVehicleId(String(urlDeviceId));
       setSelectedDate(urlDate);
+      // Auto-select shift from URL if provided and valid
+      if (urlShift && (urlShift === '6 AM to 6 PM' || urlShift === '6 PM to 6 AM')) {
+        setSelectedShift(urlShift);
+        console.log('📋 FilterControls: Auto-selected shift from URL:', urlShift);
+      }
       // Dispatch event so other components know about the selection
       window.dispatchEvent(new CustomEvent('filters:apply', {
         detail: {
           device_id: Number(urlDeviceId),
-          date: urlDate
+          date: urlDate,
+          shift: urlShift || '6 AM to 6 PM'
         }
       }));
       // Reset flag after a short delay
