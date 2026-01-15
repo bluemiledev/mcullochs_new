@@ -745,4 +745,4 @@ const AnalogChart: React.FC<AnalogChartProps> = ({
   );
 };
 
-export default AnalogChart;
+export default React.memo(AnalogChart);

@@ -18,6 +18,7 @@ interface TimeScrubberProps {
   selectionEnd: number | null;
   onTimeChange: (time: number) => void;
   onSelectionChange: (start: number, end: number) => void;
+  onSelectionCommit?: (start: number, end: number) => void; // Called on drag end (mouse up) to commit range
   onHover: (time: number | null) => void;
   isSecondViewMode?: boolean;
   showVehiclePointer?: boolean; // Show vehicle pointer (default: true for drilling, false for maintenance)
@@ -37,6 +38,7 @@ const TimeScrubber: React.FC<TimeScrubberProps> = ({
   selectionEnd,
   onTimeChange,
   onSelectionChange,
+  onSelectionCommit,
   onHover,
   isSecondViewMode = false,
   showVehiclePointer = true,
@@ -89,8 +91,18 @@ const TimeScrubber: React.FC<TimeScrubberProps> = ({
 
   const [dragMode, setDragMode] = useState<null | 'left' | 'right' | 'range'>(null);
   const isDraggingRef = useRef(false);
+  const selectionDirtyRef = useRef(false);
+  const lastSelectionRef = useRef<{ start: number; end: number } | null>(null);
 
   const clampToDay = (t: number) => Math.max(timeDomain[0], Math.min(timeDomain[1], t));
+  const commitSelectionIfDirty = useCallback(() => {
+    if (!onSelectionCommit) return;
+    if (!selectionDirtyRef.current) return;
+    const last = lastSelectionRef.current;
+    if (!last) return;
+    selectionDirtyRef.current = false;
+    onSelectionCommit(last.start, last.end);
+  }, [onSelectionCommit]);
 
   // Note: max range is no longer capped here (user can expand up to the full data domain).
 
@@ -115,10 +127,14 @@ const TimeScrubber: React.FC<TimeScrubberProps> = ({
         if (dragMode === 'left' && selectionEnd !== null) {
           const start = Math.min(time, selectionEnd);
           const end = Math.max(time, selectionEnd);
+          selectionDirtyRef.current = true;
+          lastSelectionRef.current = { start, end };
           onSelectionChange(start, end);
         } else if (dragMode === 'right' && selectionStart !== null) {
           const start = Math.min(selectionStart, time);
           const end = Math.max(selectionStart, time);
+          selectionDirtyRef.current = true;
+          lastSelectionRef.current = { start, end };
           onSelectionChange(start, end);
         } else if (dragMode === 'range' && selectionStart !== null && selectionEnd !== null) {
           const width = selectionEnd - selectionStart;
@@ -132,6 +148,8 @@ const TimeScrubber: React.FC<TimeScrubberProps> = ({
             newStart = timeDomain[0];
             newEnd = newStart + width;
           }
+          selectionDirtyRef.current = true;
+          lastSelectionRef.current = { start: newStart, end: newEnd };
           onSelectionChange(newStart, newEnd);
         }
       }
@@ -183,6 +201,8 @@ const TimeScrubber: React.FC<TimeScrubberProps> = ({
         newEnd = timeDomain[1];
         newStart = newEnd - width;
       }
+      selectionDirtyRef.current = true;
+      lastSelectionRef.current = { start: newStart, end: newEnd };
       onSelectionChange(newStart, newEnd);
       setDragMode('range');
     }
@@ -197,7 +217,8 @@ const TimeScrubber: React.FC<TimeScrubberProps> = ({
   const handleMouseUp = useCallback(() => {
     isDraggingRef.current = false;
     setDragMode(null);
-  }, []);
+    commitSelectionIfDirty();
+  }, [commitSelectionIfDirty]);
 
   const handleMouseLeave = useCallback(() => {
     // keep steady
@@ -384,6 +405,8 @@ const TimeScrubber: React.FC<TimeScrubberProps> = ({
         // Update on every significant change (reduced threshold for smoother dragging)
         if (Math.abs(newStart - lastStart) > 50) {
           lastStart = newStart;
+          selectionDirtyRef.current = true;
+          lastSelectionRef.current = { start: newStart, end };
           onSelectionChange(newStart, end);
         }
       });
@@ -396,6 +419,7 @@ const TimeScrubber: React.FC<TimeScrubberProps> = ({
       }
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
+      commitSelectionIfDirty();
     };
     
     window.addEventListener('mousemove', onMove);
@@ -431,6 +455,8 @@ const TimeScrubber: React.FC<TimeScrubberProps> = ({
         // Update on every significant change (reduced threshold for smoother dragging)
         if (Math.abs(newEnd - lastEnd) > 50) {
           lastEnd = newEnd;
+          selectionDirtyRef.current = true;
+          lastSelectionRef.current = { start, end: newEnd };
           onSelectionChange(start, newEnd);
         }
       });
@@ -443,6 +469,7 @@ const TimeScrubber: React.FC<TimeScrubberProps> = ({
       }
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
+      commitSelectionIfDirty();
     };
     
     window.addEventListener('mousemove', onMove);
@@ -497,6 +524,8 @@ const TimeScrubber: React.FC<TimeScrubberProps> = ({
               scale="time"
               domain={timeDomain}
               ticks={ticks as any}
+              interval={0}
+              minTickGap={0}
               tickFormatter={formatTime}
               tick={{ fill: '#6b7280', fontSize: 9 }}
               style={{ fontSize: '9px' }}

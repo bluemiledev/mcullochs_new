@@ -575,4 +575,4 @@ const DigitalSignalTimeline: React.FC<DigitalSignalTimelineProps> = ({
   );
 };
 
-export default DigitalSignalTimeline;
+export default React.memo(DigitalSignalTimeline);

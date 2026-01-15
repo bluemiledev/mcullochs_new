@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef, useDeferredValue } from 'react';
 import { flushSync } from 'react-dom';
 import { format, parseISO } from 'date-fns';
 import { useSearchParams, useNavigate } from 'react-router-dom';
@@ -184,7 +184,6 @@ const VehicleDashboard: React.FC = () => {
   } | null>(null);
   const [rawTimestamps, setRawTimestamps] = useState<number[]>([]); // Store raw timestamps from API for scrubber
   const { processData, getWindow, clearCache } = useDataProcessor();
-  const rangeChangeTimeoutRef = useRef<NodeJS.Timeout | null>(null); // For debouncing range change API calls
   const loadVersionRef = useRef<number>(0); // Used to ignore stale async/chunk updates when a new load starts
 
   const [errorModal, setErrorModal] = useState<{
@@ -2946,7 +2945,7 @@ useEffect(() => {
         // Set digital chart immediately if present (ignore stale loads)
         if (digitalChart && digitalChart.metrics.length > 0) {
           if (loadVersion !== loadVersionRef.current) return;
-          setDigitalStatusChart(digitalChart);
+        setDigitalStatusChart(digitalChart);
         }
 
         // Process all analog metrics but render progressively to avoid blocking UI
@@ -3185,10 +3184,40 @@ useEffect(() => {
     return [first, last];
   }, [selectionStart, selectionEnd, vehicleMetrics, digitalStatusChart]);
 
+  // Defer expensive chart updates while user is dragging/interacting with the scrubber.
+  // This keeps the scrubber pointer/handles responsive.
+  const deferredTimeDomain = useDeferredValue(timeDomain);
+  const deferredSelectedTime = useDeferredValue(selectedTime);
+
+  const visibleDigitalSignals = useMemo(() => {
+    if (!digitalStatusChart?.metrics?.length) return [];
+    return digitalStatusChart.metrics.filter(
+      (m) => forceAllChartsVisible || (visibleDigital[m.id] ?? true)
+    );
+  }, [digitalStatusChart, forceAllChartsVisible, visibleDigital]);
+
+  const visibleAnalogMetrics = useMemo(() => {
+    return vehicleMetrics.filter((m) => {
+      // Standard analog visibility
+      let shouldShow = forceAllChartsVisible || (visibleAnalog[m.id] ?? true);
+
+      // Drilling mode: also check downhole chart filters
+      if (screenMode === 'Drilling' && shouldShow) {
+        if (Object.keys(visibleDownholeCharts).length === 0) {
+          shouldShow = true;
+        } else {
+          shouldShow = visibleDownholeCharts[m.name] === true;
+        }
+      }
+
+      return shouldShow;
+    });
+  }, [vehicleMetrics, forceAllChartsVisible, visibleAnalog, visibleDownholeCharts, screenMode]);
+
   // Use refs to track throttling for smooth scrubber performance
   const rafRef = useRef<number | null>(null);
   const lastUpdateRef = useRef<number>(0);
-  const THROTTLE_MS = 16; // ~60fps
+  const THROTTLE_MS = 33; // ~30fps (smoother under heavy chart load)
   
   // Handle time change from scrubber with throttling for smooth performance
   const handleTimeChange = useCallback((timestamp: number) => {
@@ -3220,7 +3249,7 @@ useEffect(() => {
     }
   }, []); // Always use minute view settings
 
-  const handleSelectionChange = useCallback((startTimestamp: number, endTimestamp: number) => {
+  const normalizeRange = useCallback((startTimestamp: number, endTimestamp: number) => {
     // Allow user to expand the range (no max cap). Keep a small minimum range for usability.
     const minRangeMs = 60 * 60 * 1000; // minimum 1 hour (even in second view mode)
 
@@ -3242,7 +3271,7 @@ useEffect(() => {
       const d = new Date(rawTimestamps[0]);
       d.setUTCHours(0, 0, 0, 0);
       baseDayMs = d.getTime();
-    } else {
+      } else {
       baseDayMs = parseDateToUtcDayStartMs(selectedDate);
     }
     if (baseDayMs == null) {
@@ -3266,19 +3295,24 @@ useEffect(() => {
       if (endMs - startMs < minRangeMs) {
         if (startMs + minRangeMs <= domainEnd) {
           endMs = startMs + minRangeMs;
-        } else {
+            } else {
           startMs = domainEnd - minRangeMs;
           endMs = domainEnd;
         }
       }
     }
 
+    return { startMs, endMs };
+  }, [rawTimestamps, selectedDate, selectedShift]);
+
+  const handleSelectionChange = useCallback((startTimestamp: number, endTimestamp: number) => {
+    const { startMs, endMs } = normalizeRange(startTimestamp, endTimestamp);
     const newStart = new Date(startMs);
     const newEnd = new Date(endMs);
 
     setSelectionStart(newStart);
     setSelectionEnd(newEnd);
-
+    
     // Keep selected time inside the visible window (don’t force recenter every time).
     const current = selectedTime?.getTime?.() ?? null;
     if (current == null) {
@@ -3288,19 +3322,12 @@ useEffect(() => {
     } else if (current > endMs) {
       setSelectedTime(new Date(endMs));
     }
+  }, [normalizeRange, selectedTime, setSelectedTime]);
 
-    // Debounce API call to avoid too many requests while dragging
-    // Clear any pending timeout
-    if (rangeChangeTimeoutRef.current) {
-      clearTimeout(rangeChangeTimeoutRef.current);
-    }
-
-    // Set a new timeout to fetch table data after user stops dragging (500ms delay)
-    rangeChangeTimeoutRef.current = setTimeout(() => {
-      // Trigger full data reload (charts + tables) for the selected range.
-      setApiRange({ startMs, endMs });
-    }, 500);
-  }, [isSecondViewMode, rawTimestamps, selectedTime, setSelectedTime, selectedShift, selectedDate]);
+  const handleSelectionCommit = useCallback((startTimestamp: number, endTimestamp: number) => {
+    const { startMs, endMs } = normalizeRange(startTimestamp, endTimestamp);
+    setApiRange({ startMs, endMs });
+  }, [normalizeRange]);
 
   // Handle hover from scrubber
   const handleHover = useCallback((_timestamp: number | null) => {
@@ -3346,6 +3373,7 @@ useEffect(() => {
             selectionEnd={selectionEnd.getTime()}
             onTimeChange={handleTimeChange}
             onSelectionChange={handleSelectionChange}
+            onSelectionCommit={handleSelectionCommit}
             onHover={handleHover}
             isSecondViewMode={isSecondViewMode}
             showVehiclePointer={screenMode === 'Drilling'}
@@ -3384,10 +3412,10 @@ useEffect(() => {
           <div id="digitalSignalContainer">
             {digitalStatusChart && digitalStatusChart.metrics.length > 0 && (
               <DigitalSignalTimeline
-                signals={digitalStatusChart.metrics.filter(m => forceAllChartsVisible || (visibleDigital[m.id] ?? true))}
-                selectedTime={selectedTime}
+                signals={visibleDigitalSignals}
+                selectedTime={deferredSelectedTime}
                 crosshairActive={crosshairActive}
-                timeDomain={timeDomain}
+                timeDomain={deferredTimeDomain}
                 isSecondViewMode={isSecondViewMode}
               />
             )}
@@ -3397,36 +3425,7 @@ useEffect(() => {
               {/* Analog Charts - Only show in Drilling mode */}
               {screenMode === 'Drilling' && (
           <div id="analogChartsContainer" className={styles.chartsContainer} data-print-full-page={forceAllChartsVisible}>
-            {(() => {
-              // Debug: Log filter results
-              if (forceAllChartsVisible) {
-                console.log('🖨️ forceAllChartsVisible is TRUE - showing all', vehicleMetrics.length, 'charts');
-              }
-              const filtered = vehicleMetrics.filter(m => {
-                // Check standard analog visibility
-                let shouldShow = forceAllChartsVisible || (visibleAnalog[m.id] ?? true);
-                
-                // For drilling mode, also check downhole chart filters
-                if (screenMode === 'Drilling' && shouldShow) {
-                  // If no filters are applied (empty object), show all charts
-                  if (Object.keys(visibleDownholeCharts).length === 0) {
-                    shouldShow = true;
-                  } else {
-                    // If filters are applied, only show charts where visibility is explicitly true
-                    shouldShow = visibleDownholeCharts[m.name] === true;
-                  }
-                }
-                
-                if (!shouldShow && forceAllChartsVisible) {
-                  console.warn('🖨️ Chart filtered out despite forceAllChartsVisible:', m.id);
-                }
-                return shouldShow;
-              });
-              if (forceAllChartsVisible && filtered.length !== vehicleMetrics.length) {
-                console.error('🖨️ ERROR: Not all charts are visible! Expected:', vehicleMetrics.length, 'Got:', filtered.length);
-              }
-              return filtered;
-            })().map(metric => {
+            {visibleAnalogMetrics.map(metric => {
               return (
                 <AnalogChart
                   key={metric.id}
@@ -3438,9 +3437,9 @@ useEffect(() => {
                   max_color={metric.max_color}
                   data={metric.data}
                   yAxisRange={metric.yAxisRange}
-                  selectedTime={selectedTime}
+                  selectedTime={deferredSelectedTime}
                   crosshairActive={crosshairActive}
-                  timeDomain={timeDomain}
+                  timeDomain={deferredTimeDomain}
                   isSecondViewMode={isSecondViewMode}
                 />
               );

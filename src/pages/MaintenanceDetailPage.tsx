@@ -437,6 +437,7 @@ const MaintenanceDetailPage: React.FC = () => {
             selectionEnd={selectionEnd?.getTime() || null}
             onTimeChange={handleTimeChange}
             onSelectionChange={handleSelectionChange}
+            onSelectionCommit={handleSelectionChange}
             onHover={handleHover}
             isSecondViewMode={false}
             showVehiclePointer={false}
