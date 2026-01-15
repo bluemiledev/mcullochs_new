@@ -233,9 +233,9 @@ const AnalogChart: React.FC<AnalogChartProps> = ({
     });
 
     // Detect time gaps and insert null points to break the line
-    // Expected interval is 1 minute (60000 ms), but allow up to 2 minutes before breaking
-    const EXPECTED_INTERVAL = 60 * 1000; // 1 minute
-    const MAX_GAP = 2 * 60 * 1000; // 2 minutes - if gap is larger, insert null point
+    // Second view: 1s buckets; Minute view: 60s buckets
+    const EXPECTED_INTERVAL = isSecondViewMode ? 1000 : 60 * 1000;
+    const MAX_GAP = isSecondViewMode ? 2 * 1000 : 2 * 60 * 1000; // insert null if gap is larger
     const withGaps: ChartDataPoint[] = [];
     
     for (let i = 0; i < result.length; i++) {
@@ -309,7 +309,7 @@ const AnalogChart: React.FC<AnalogChartProps> = ({
     }
     
     return sortedData;
-  }, [data, timeDomain, id, name]);
+  }, [data, timeDomain, id, name, isSecondViewMode]);
 
   // Debug: Log if colors are provided and check shadow data
   React.useEffect(() => {

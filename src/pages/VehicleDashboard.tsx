@@ -44,6 +44,98 @@ interface DigitalStatusChart {
   }>;
 }
 
+const parseShiftApiToSeconds = (shiftApi: string): { startSec: number; endSec: number } => {
+  const match = String(shiftApi || '').match(
+    /^(\d{2}):(\d{2}):(\d{2})to(\d{2}):(\d{2}):(\d{2})$/
+  );
+  if (!match) {
+    return { startSec: 6 * 3600, endSec: 18 * 3600 };
+  }
+  const toSec = (h: string, m: string, s: string) => {
+    const hh = Number(h);
+    const mm = Number(m);
+    const ss = Number(s);
+    return (hh * 3600) + (mm * 60) + ss;
+  };
+  const start = toSec(match[1], match[2], match[3]);
+  let end = toSec(match[4], match[5], match[6]);
+  if (end <= start) end += 24 * 3600; // handle shift crossing midnight
+  return { startSec: start, endSec: end };
+};
+
+const formatSecondsToHms = (sec: number): string => {
+  const mod = ((Math.floor(sec) % 86400) + 86400) % 86400;
+  const hh = Math.floor(mod / 3600);
+  const mm = Math.floor((mod % 3600) / 60);
+  const ss = mod % 60;
+  return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`;
+};
+
+const formatDateUtcToHms = (date: Date): string => {
+  const hours = String(date.getUTCHours()).padStart(2, '0');
+  const minutes = String(date.getUTCMinutes()).padStart(2, '0');
+  const seconds = String(date.getUTCSeconds()).padStart(2, '0');
+  return `${hours}:${minutes}:${seconds}`;
+};
+
+const getCenteredWindowSeconds = (
+  shiftStartSec: number,
+  shiftEndSec: number,
+  windowSec: number
+): { startSec: number; endSec: number; centerSec: number } => {
+  const duration = Math.max(0, shiftEndSec - shiftStartSec);
+  const w = Math.max(1, Math.min(windowSec, duration || windowSec));
+  const center = shiftStartSec + duration / 2;
+  let start = Math.round(center - w / 2);
+  let end = start + w;
+
+  if (start < shiftStartSec) {
+    start = shiftStartSec;
+    end = start + w;
+  }
+  if (end > shiftEndSec) {
+    end = shiftEndSec;
+    start = end - w;
+  }
+  const centerSec = start + w / 2;
+  return { startSec: start, endSec: end, centerSec };
+};
+
+const parseDateToUtcDayStartMs = (dateStr: string): number | null => {
+  const s = String(dateStr || '').trim();
+  // YYYY-MM-DD
+  let m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (m) {
+    const y = Number(m[1]);
+    const mo = Number(m[2]);
+    const d = Number(m[3]);
+    if (Number.isFinite(y) && Number.isFinite(mo) && Number.isFinite(d)) {
+      return Date.UTC(y, mo - 1, d, 0, 0, 0, 0);
+    }
+  }
+  // DD-MM-YYYY
+  m = s.match(/^(\d{2})-(\d{2})-(\d{4})$/);
+  if (m) {
+    const d = Number(m[1]);
+    const mo = Number(m[2]);
+    const y = Number(m[3]);
+    if (Number.isFinite(y) && Number.isFinite(mo) && Number.isFinite(d)) {
+      return Date.UTC(y, mo - 1, d, 0, 0, 0, 0);
+    }
+  }
+  // DD/MM/YYYY
+  m = s.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (m) {
+    const d = Number(m[1]);
+    const mo = Number(m[2]);
+    const y = Number(m[3]);
+    if (Number.isFinite(y) && Number.isFinite(mo) && Number.isFinite(d)) {
+      return Date.UTC(y, mo - 1, d, 0, 0, 0, 0);
+    }
+  }
+  return null;
+};
+
 const VehicleDashboard: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   
@@ -78,6 +170,8 @@ const VehicleDashboard: React.FC = () => {
   const [forceAllChartsVisible, setForceAllChartsVisible] = useState<boolean>(false);
   const [selectedHourRange, setSelectedHourRange] = useState<{ start: string; end: string; label: string } | null>(null);
   const [screenMode, setScreenMode] = useState<'Maintenance' | 'Drilling'>('Maintenance');
+  const [isSecondViewMode, setIsSecondViewMode] = useState<boolean>(false);
+  const [apiRange, setApiRange] = useState<{ startMs: number; endMs: number } | null>(null);
   const [tableData, setTableData] = useState<Record<string, { value: number; max: number }> | null>(null);
   const [showDrillingFilters, setShowDrillingFilters] = useState<boolean>(false);
   const [visibleDownholeCharts, setVisibleDownholeCharts] = useState<Record<string, boolean>>({});
@@ -91,6 +185,7 @@ const VehicleDashboard: React.FC = () => {
   const [rawTimestamps, setRawTimestamps] = useState<number[]>([]); // Store raw timestamps from API for scrubber
   const { processData, getWindow, clearCache } = useDataProcessor();
   const rangeChangeTimeoutRef = useRef<NodeJS.Timeout | null>(null); // For debouncing range change API calls
+  const loadVersionRef = useRef<number>(0); // Used to ignore stale async/chunk updates when a new load starts
 
   const [errorModal, setErrorModal] = useState<{
     isOpen: boolean;
@@ -344,6 +439,7 @@ useEffect(() => {
     setSelectionStart(null);
     setSelectionEnd(null);
     setRawTimestamps([]); // Clear raw timestamps
+    setApiRange(null); // Reset any previously selected API range
     
     setSelectedVehicleId(vehicleId);
     // Note: selectedVehicleSerialNo is set by the asset:selected event listener
@@ -903,7 +999,10 @@ useEffect(() => {
       return;
     }
 
+    const controller = new AbortController();
     const load = async () => {
+      // Increment load version so any previous in-flight processing stops applying updates.
+      const loadVersion = ++loadVersionRef.current;
       try {
         setLoading(true);
         setProcessingProgress(0);
@@ -1013,20 +1112,31 @@ useEffect(() => {
         */
         
         // LOAD FROM API BASED ON SCREEN MODE (using proxy to avoid CORS)
+        // Always send start_time/end_time:
+        // - Initial load: 1 hour window centered on shift (scrubber center)
+        // - Range change: selected range from scrubber
+        const shiftParamForApi = formatShiftForAPI(selectedShift);
+        const { startSec: shiftStartSec, endSec: shiftEndSec } = parseShiftApiToSeconds(shiftParamForApi);
+        const centered = getCenteredWindowSeconds(shiftStartSec, shiftEndSec, 60 * 60); // 1 hour
+        const startTimeStr = apiRange
+          ? formatDateUtcToHms(new Date(apiRange.startMs))
+          : formatSecondsToHms(centered.startSec);
+        const endTimeStr = apiRange
+          ? formatDateUtcToHms(new Date(apiRange.endMs))
+          : formatSecondsToHms(centered.endSec);
+
         let apiUrl: string;
         if (screenMode === 'Drilling') {
           // Use new drilling API with parameters
-          const shiftParam = formatShiftForAPI(selectedShift);
           // Use devices_serial_no (string) for API call
           const serialNo = selectedVehicleSerialNo || String(selectedVehicleId);
-          apiUrl = `/reet_python/mccullochs/apis/get_drilling_json.php?devices_serial_no=${encodeURIComponent(serialNo)}&date=${encodeURIComponent(selectedDate)}&shift=${encodeURIComponent(shiftParam)}`;
+          apiUrl = `/reet_python/mccullochs/apis/get_drilling_json.php?devices_serial_no=${encodeURIComponent(serialNo)}&date=${encodeURIComponent(selectedDate)}&shift=${encodeURIComponent(shiftParamForApi)}&start_time=${encodeURIComponent(startTimeStr)}&end_time=${encodeURIComponent(endTimeStr)}`;
           console.log(`📂 Loading ${screenMode} data from API:`, apiUrl);
         } else {
           // Maintenance mode - use new maintenance API with parameters
-          const shiftParam = formatShiftForAPI(selectedShift);
           // Use devices_serial_no (string) for API call
           const serialNo = selectedVehicleSerialNo || String(selectedVehicleId);
-          apiUrl = `/reet_python/mccullochs/apis/get_maintenance_json.php?devices_serial_no=${encodeURIComponent(serialNo)}&date=${encodeURIComponent(selectedDate)}&shift=${encodeURIComponent(shiftParam)}`;
+          apiUrl = `/reet_python/mccullochs/apis/get_maintenance_json.php?devices_serial_no=${encodeURIComponent(serialNo)}&date=${encodeURIComponent(selectedDate)}&shift=${encodeURIComponent(shiftParamForApi)}&start_time=${encodeURIComponent(startTimeStr)}&end_time=${encodeURIComponent(endTimeStr)}`;
           console.log(`📂 Loading ${screenMode} data from API:`, apiUrl);
         }
         
@@ -1035,14 +1145,19 @@ useEffect(() => {
             'Accept': 'application/json'
           },
           cache: 'no-store',
-          mode: 'cors'
+          mode: 'cors',
+          signal: controller.signal
         });
+
+        // Ignore stale loads (e.g., user dragged range again quickly)
+        if (loadVersion !== loadVersionRef.current) return;
         
         if (!response.ok) {
           throw new Error(`Failed to load data from API: ${response.status} ${response.statusText}`);
         }
         
         const responseText = await response.text();
+        if (loadVersion !== loadVersionRef.current) return;
         let json: any;
         
         try {
@@ -1052,9 +1167,12 @@ useEffect(() => {
           console.error('❌ Response text (first 1000 chars):', responseText.substring(0, 1000));
           throw new Error('Invalid JSON response from API');
         }
+
+        if (loadVersion !== loadVersionRef.current) return;
         
         // Handle API response structure: { success: true, data: {...} }
         if (json.success && json.data) {
+          if (loadVersion !== loadVersionRef.current) return;
           // Extract table data for maintenance mode
           if (screenMode === 'Maintenance') {
             // Helper function to convert array format to object format
@@ -1224,7 +1342,10 @@ useEffect(() => {
         let payload: any = {
           timestamps: json.timestamps || [],
           gpsPerSecond: json.gpsPerSecond || [],
-          digitalPerSecond: json.digitalPerMinute || [],
+          // New API can provide both per-second and per-minute series.
+          digitalPerSecond: json.digitalPerSecond || [],
+          digitalPerMinute: json.digitalPerMinute || [],
+          analogPerSecond: json.analogPerSecond || [],
           analogPerMinute: json.analogPerMinute || []
         };
         
@@ -1395,20 +1516,11 @@ useEffect(() => {
           const dataStart = new Date(processedTimestamps[0]);
           const dataEnd = new Date(processedTimestamps[processedTimestamps.length - 1]);
           
-          // If we don't have a selection range yet, or if the current range doesn't match the data, update it
-          if (!selectionStart || !selectionEnd || 
-              selectionStart.getTime() < processedTimestamps[0] || 
-              selectionEnd.getTime() > processedTimestamps[processedTimestamps.length - 1]) {
-            setSelectionStart(dataStart);
-            setSelectionEnd(dataEnd);
-            // Set selected time to center of data range
+          // Set a reasonable initial selected time (center of the full data domain).
+          // The visible window (selectionStart/End) is set later once all signals are processed.
+          if (!selectedTime) {
             const centerTime = new Date((dataStart.getTime() + dataEnd.getTime()) / 2);
             setSelectedTime(centerTime);
-            console.log('✅ Set selection range to match data timestamps:', 
-              `${String(dataStart.getUTCHours()).padStart(2, '0')}:${String(dataStart.getUTCMinutes()).padStart(2, '0')}:${String(dataStart.getUTCSeconds()).padStart(2, '0')} UTC`,
-              'to',
-              `${String(dataEnd.getUTCHours()).padStart(2, '0')}:${String(dataEnd.getUTCMinutes()).padStart(2, '0')}:${String(dataEnd.getUTCSeconds()).padStart(2, '0')} UTC`
-            );
           }
         }
         
@@ -1416,8 +1528,17 @@ useEffect(() => {
         const timeToTimestampMap = new Map<string, number>();
         if (payload.timestamps && Array.isArray(payload.timestamps)) {
           payload.timestamps.forEach((ts: any) => {
-            if (ts.time && ts.timestamp) {
-              timeToTimestampMap.set(ts.time, ts.timestamp);
+            if (!ts?.time) return;
+            const raw = ts.timestamp ?? ts.time ?? ts.ts;
+            let ms: number | null = null;
+            if (typeof raw === 'number') {
+              ms = raw < 1e12 ? raw * 1000 : raw;
+            } else if (typeof raw === 'string') {
+              const parsed = Date.parse(raw);
+              ms = Number.isFinite(parsed) ? parsed : null;
+            }
+            if (ms != null && Number.isFinite(ms)) {
+              timeToTimestampMap.set(String(ts.time), ms);
             }
           });
         }
@@ -1819,9 +1940,12 @@ useEffect(() => {
           return ts;
         };
 
-        // Align timestamp to minute boundary: Math.floor(timestamp / 60000) * 60000
+        // Align timestamps to a time bucket.
+        // - Minute view: 60s buckets
+        // - Second view: 1s buckets
+        let bucketMs = 60 * 1000;
         const alignToMinute = (timestampMs: number): number => {
-          return Math.floor(timestampMs / 60000) * 60000;
+          return Math.floor(timestampMs / bucketMs) * bucketMs;
         };
 
         // Get times array from timestamps field (new API format)
@@ -1837,10 +1961,72 @@ useEffect(() => {
           : [];
         }
         
-        const times: number[] = timesRaw
+        const parsedTimes: number[] = timesRaw
           .map(parseTimestampToMs)
           .filter((n: number) => Number.isFinite(n))
+          .sort((a, b) => a - b);
+
+        // Infer resolution from payload/timestamps.
+        const hasPerSecondSeries =
+          (Array.isArray((payload as any).analogPerSecond) && (payload as any).analogPerSecond.length > 0) ||
+          (Array.isArray((payload as any).digitalPerSecond) && (payload as any).digitalPerSecond.length > 0);
+
+        // Prefer the real timestamp array from the API when available (it can be numbers or parsed ISO strings).
+        // Fall back to parsedTimes otherwise.
+        const inferenceTimes =
+          (Array.isArray(processedTimestamps) && processedTimestamps.length > 1)
+            ? processedTimestamps
+            : parsedTimes;
+
+        // Scan a small prefix for the smallest positive delta.
+        let minDelta = Number.POSITIVE_INFINITY;
+        for (let i = 1; i < Math.min(inferenceTimes.length, 2000); i++) {
+          const d = inferenceTimes[i] - inferenceTimes[i - 1];
+          if (d > 0 && d < minDelta) minDelta = d;
+          if (minDelta <= 1000) break; // can't get smaller than 1s for our use case
+        }
+
+        // If the server sent per-minute arrays but point times include non-zero seconds, treat as per-second.
+        const hasSecondGranularityInPointTimes = (() => {
+          const checkSeries = (arr: any): boolean => {
+            if (!Array.isArray(arr)) return false;
+            for (const series of arr.slice(0, 5)) {
+              const pts = (series as any)?.points;
+              if (!Array.isArray(pts)) continue;
+              for (const p of pts.slice(0, 200)) {
+                const t = String((p as any)?.time ?? '');
+                const parts = t.split(':');
+                if (parts.length >= 3) {
+                  const ss = Number(parts[2]);
+                  if (Number.isFinite(ss) && ss !== 0) return true;
+                }
+              }
+            }
+            return false;
+          };
+          return (
+            checkSeries((payload as any).analogPerMinute) ||
+            checkSeries((payload as any).digitalPerMinute) ||
+            checkSeries((payload as any).analogPerSecond) ||
+            checkSeries((payload as any).digitalPerSecond)
+          );
+        })();
+
+        const inferredSecondView =
+          hasPerSecondSeries ||
+          hasSecondGranularityInPointTimes ||
+          (Number.isFinite(minDelta) && minDelta > 0 && minDelta < 60 * 1000);
+
+        // Update UI mode (used by scrubber + charts)
+        setIsSecondViewMode(inferredSecondView);
+
+        // Set alignment bucket for all subsequent parsing/series building in this load.
+        bucketMs = inferredSecondView ? 1000 : 60 * 1000;
+
+        const times: number[] = parsedTimes
           .map(alignToMinute)
+          .filter((n: number) => Number.isFinite(n))
+          .filter((n: number, i: number, arr: number[]) => i === 0 || n !== arr[i - 1])
           .sort((a, b) => a - b); // Sort ascending
         
         console.log('📅 Times array:', {
@@ -2253,25 +2439,18 @@ useEffect(() => {
         let perSecondAnalogMaxTs: number | null = null;
         let perSecondDigitalMinTs: number | null = null;
         let perSecondDigitalMaxTs: number | null = null;
-        // Digital per-second override
-        if (!digitalChart.metrics.length && Array.isArray((payload as any).digitalPerSecond)) {
-          console.group('📊 Digital Per-Second Signals - Raw API Data');
-          console.log('Number of digital per-second series:', (payload.digitalPerSecond as Array<any>).length);
-          (payload.digitalPerSecond as Array<any>).forEach((series: any, idx: number) => {
-            console.group(`📊 Digital Per-Second Series ${idx + 1} - Raw API Data: ${series.name || series.id || 'Unknown'}`);
-            console.log('Complete API Object:', JSON.stringify(series, null, 2));
-            console.log('Points array (first 20):', series.points?.slice(0, 20));
-            console.log('Points array (last 20):', series.points?.slice(-20));
-            console.log('Total points count:', series.points?.length || 0);
-            console.groupEnd();
-          });
-          console.groupEnd();
+        // Digital per-second override (preferred when second-view is inferred)
+        if (
+          Array.isArray((payload as any).digitalPerSecond) &&
+          (payload.digitalPerSecond as Array<any>).length > 0 &&
+          (bucketMs === 1000 || !digitalChart.metrics.length)
+        ) {
           const parseHMS = (hms: string) => {
             const [hh, mm, ss] = String(hms).split(':').map((n: string) => Number(n));
-            const base = new Date(times[0] ?? Date.now());
+            const base = new Date((processedTimestamps[0] ?? times[0] ?? Date.now()));
             base.setUTCHours(0, 0, 0, 0);
             const timestamp = base.getTime() + hh * 3600000 + mm * 60000 + ss * 1000;
-            // Align to minute boundary
+            // Align to current bucket (second or minute)
             return new Date(alignToMinute(timestamp));
           };
           // Filter by display field first
@@ -2291,10 +2470,6 @@ useEffect(() => {
           
           const metrics = filteredDigitalPerSecond.map((series: any, idx: number) => {
             // Use exact API values directly - no processing
-            // Log raw API data for verification
-            console.group(`📡 Digital Signal API Data: ${series.name || series.id} (${series.id})`);
-            console.log('Raw API points:', series.points);
-            console.log('Total points:', (series.points || []).length);
             
             const pts = (series.points || []).map((p: any) => {
               const value = Number(p.value ?? 0);
@@ -2309,23 +2484,6 @@ useEffect(() => {
             
             // Sort by timestamp
             pts.sort((a: { time: Date; value: number }, b: { time: Date; value: number }) => a.time.getTime() - b.time.getTime());
-            
-            // Log processed points with exact values
-            console.log('Processed points (first 20):', pts.slice(0, 20).map((p:any) => ({
-              time: format(p.time, 'HH:mm:ss'),
-              timestamp: p.time.getTime(),
-              value: p.value,
-              status: p.value === 1 ? 'ON' : 'OFF',
-              rawTime: p.rawTime,
-              rawValue: p.rawValue
-            })));
-            console.log('Processed points (last 10):', pts.slice(-10).map((p: { time: Date; value: number; rawTime: string; rawValue: any }) => ({
-              time: format(p.time, 'HH:mm:ss'),
-              timestamp: p.time.getTime(),
-              value: p.value,
-              status: p.value === 1 ? 'ON' : 'OFF'
-            })));
-            console.groupEnd();
             
             if (pts.length) {
               const localMin = pts[0].time.getTime();
@@ -2350,13 +2508,21 @@ useEffect(() => {
             };
           }
         }
-        if (!analogMetrics.length && Array.isArray((payload as any).analogPerSecond)) {
+        if (
+          Array.isArray((payload as any).analogPerSecond) &&
+          (payload.analogPerSecond as Array<any>).length > 0 &&
+          (bucketMs === 1000 || !analogMetrics.length)
+        ) {
+          // Prefer per-second series in second-view mode.
+          if (bucketMs === 1000) {
+            analogMetrics.length = 0;
+          }
           const parseHMS = (hms: string) => {
             const [hh, mm, ss] = String(hms).split(':').map((n: string) => Number(n));
-            const base = new Date(times[0] ?? Date.now());
+            const base = new Date((processedTimestamps[0] ?? times[0] ?? Date.now()));
             base.setUTCHours(0, 0, 0, 0);
             const timestamp = base.getTime() + hh * 3600000 + mm * 60000 + ss * 1000;
-            // Align to minute boundary
+            // Align to current bucket (second or minute)
             return new Date(alignToMinute(timestamp));
           };
           (payload.analogPerSecond as Array<any>)
@@ -2442,24 +2608,9 @@ useEffect(() => {
             const maxVal = allMaxs.length > 0 ? Math.max(...allMaxs) : (values.length > 0 ? Math.max(...values) : 0);
             const usedRange = series.yAxisRange ? { min: Number(series.yAxisRange.min), max: Number(series.yAxisRange.max) } : { min: minVal, max: maxVal };
             
-            // Debug: Log processed per-second data
-            console.group(`🔍 Analog Per-Second Series - Processed Data: ${id}`);
-            console.log('Resolution:', resolution, 'Offset:', offset);
-            console.log('API Points (raw):', series.points);
-            console.log('Processed Points (after transformation):', rawPts);
-            console.log('Points Count:', rawPts.length);
-            console.log('First 5 points:', rawPts.slice(0, 5));
-            console.log('Last 5 points:', rawPts.slice(-5));
             const safeAvg = values.length > 0 ? values.reduce((a: number, b: number) => a + b, 0) / values.length : 0;
             const safeMin = allMins.length > 0 ? Math.min(...allMins) : (values.length > 0 ? Math.min(...values) : 0);
             const safeMax = allMaxs.length > 0 ? Math.max(...allMaxs) : (values.length > 0 ? Math.max(...values) : 0);
-            console.log('Calculated Stats (after transformation):', {
-              avg: safeAvg,
-              min: safeMin,
-              max: safeMax
-            });
-            console.log('Y-Axis Range:', usedRange);
-            console.groupEnd();
             
             const existing = analogMetrics.find(m => m.id === id);
             if (existing) {
@@ -2487,21 +2638,13 @@ useEffect(() => {
                 yAxisRange: usedRange
               };
               
-              // Debug: Log what we're setting
-              console.log(`✅ analogPerSecond - Metric being created for ${id}:`, {
-                min_color: metric.min_color,
-                max_color: metric.max_color,
-                hasMinColor: !!metric.min_color,
-                hasMaxColor: !!metric.max_color
-              });
-              
               analogMetrics.push(metric);
             }
           });
         }
         // Process analogPerMinute if available (new API returns this format)
         // Prioritize analogPerMinute over analogPerSecond for the new API
-        if (Array.isArray((payload as any).analogPerMinute) && (payload.analogPerMinute as Array<any>).length > 0) {
+        if (bucketMs !== 1000 && Array.isArray((payload as any).analogPerMinute) && (payload.analogPerMinute as Array<any>).length > 0) {
           // Clear any existing analog metrics if we have analogPerMinute data
           analogMetrics.length = 0;
           console.group('📊 Analog Per-Minute Data - API Response');
@@ -2801,21 +2944,25 @@ useEffect(() => {
         console.log('📊 All Digital Signal IDs in final chart:', digitalChart.metrics.map(m => m.id));
         console.groupEnd();
 
-        // Set digital chart immediately if present
+        // Set digital chart immediately if present (ignore stale loads)
         if (digitalChart && digitalChart.metrics.length > 0) {
-        setDigitalStatusChart(digitalChart);
+          if (loadVersion !== loadVersionRef.current) return;
+          setDigitalStatusChart(digitalChart);
         }
 
         // Process all analog metrics but render progressively to avoid blocking UI
+        if (loadVersion !== loadVersionRef.current) return;
         setProcessingProgress(10); // 10% - data received
         
         // Use requestAnimationFrame to process data in chunks for better performance
         const processDataInChunks = () => {
+          if (loadVersion !== loadVersionRef.current) return;
           const CHUNK_SIZE = 10; // Process 10 charts at a time
           const totalCharts = analogMetrics.length;
           let processedCount = 0;
           
           const processChunk = () => {
+            if (loadVersion !== loadVersionRef.current) return;
             const start = processedCount;
             const end = Math.min(start + CHUNK_SIZE, totalCharts);
             const chunk = analogMetrics.slice(start, end);
@@ -2835,10 +2982,12 @@ useEffect(() => {
             if (processedCount < totalCharts) {
               // Use requestAnimationFrame for smooth rendering
               requestAnimationFrame(() => {
+                if (loadVersion !== loadVersionRef.current) return;
                 setTimeout(processChunk, 0); // Allow browser to render between chunks
               });
             } else {
               // All processed
+              if (loadVersion !== loadVersionRef.current) return;
               setProcessingProgress(100);
               setLoading(false);
             }
@@ -2847,6 +2996,7 @@ useEffect(() => {
           if (totalCharts > 0) {
             processChunk();
           } else {
+            if (loadVersion !== loadVersionRef.current) return;
             setVehicleMetrics([]);
             setProcessingProgress(100);
             setLoading(false);
@@ -2854,10 +3004,13 @@ useEffect(() => {
         };
         
         // Start processing after a brief delay to show progress
-        setTimeout(processDataInChunks, 50);
+        setTimeout(() => {
+          if (loadVersion !== loadVersionRef.current) return;
+          processDataInChunks();
+        }, 50);
 
         // Set time range after all data is processed
-        const shouldUpdateTimeRange = true;
+        const shouldUpdateTimeRange = apiRange == null;
         if (shouldUpdateTimeRange) {
         // Determine the actual data range from all loaded signals
         const minCandidates: number[] = [];
@@ -2887,43 +3040,42 @@ useEffect(() => {
             }
           });
         }
-        // Set initial time range based on actual data timestamps if available
-        // Otherwise fallback to 6 AM to 6 PM (use selected date)
-        if (rawTimestamps.length > 0) {
-          // Use actual data timestamps
-          const dataStart = new Date(rawTimestamps[0]);
-          const dataEnd = new Date(rawTimestamps[rawTimestamps.length - 1]);
-          const center = new Date((dataStart.getTime() + dataEnd.getTime()) / 2);
-          setSelectedTime(center);
-          setSelectionStart(dataStart);
-          setSelectionEnd(dataEnd);
-          console.log('✅ Set initial time range from data timestamps:', 
-            `${String(dataStart.getUTCHours()).padStart(2, '0')}:${String(dataStart.getUTCMinutes()).padStart(2, '0')}:${String(dataStart.getUTCSeconds()).padStart(2, '0')} UTC`,
-            'to',
-            `${String(dataEnd.getUTCHours()).padStart(2, '0')}:${String(dataEnd.getUTCMinutes()).padStart(2, '0')}:${String(dataEnd.getUTCSeconds()).padStart(2, '0')} UTC`
-          );
+        // Set initial selection window: 1 hour centered on the scrubber (shift center).
+        // This matches the initial API request start_time/end_time.
+        const shiftApi = formatShiftForAPI(selectedShift);
+        const { startSec: shiftStartSec, endSec: shiftEndSec } = parseShiftApiToSeconds(shiftApi);
+        const centered = getCenteredWindowSeconds(shiftStartSec, shiftEndSec, 60 * 60); // 1 hour
+
+        // Base day: prefer API timestamps (most reliable), otherwise parse selectedDate, otherwise today.
+        let baseDayMs: number | null = null;
+        const firstTs = processedTimestamps.length > 0 ? processedTimestamps[0] : (minCandidates.length ? Math.min(...minCandidates) : NaN);
+        if (Number.isFinite(firstTs)) {
+          const d = new Date(firstTs);
+          d.setUTCHours(0, 0, 0, 0);
+          baseDayMs = d.getTime();
         } else {
-          // Fallback to 6 AM to 6 PM if no timestamps available yet
-          const baseDate = selectedDate ? new Date(selectedDate) : new Date();
-          const start6AM = new Date(baseDate);
-          start6AM.setHours(6, 0, 0, 0);
-          const end6PM = new Date(baseDate);
-          end6PM.setHours(18, 0, 0, 0);
-          
-          const center = new Date(Math.floor((start6AM.getTime() + end6PM.getTime()) / 2));
-              setSelectedTime(center);
-          setSelectionStart(start6AM);
-          setSelectionEnd(end6PM);
-          
-          console.log('✅ Set initial time range to 6 AM - 6 PM (fallback):', start6AM.toLocaleString(), 'to', end6PM.toLocaleString());
+          baseDayMs = parseDateToUtcDayStartMs(selectedDate);
         }
-        console.log('✅ Scrubber data available:', scrubberData.length > 0 ? 'Yes' : 'No', scrubberData.length, 'points');
-        console.log('✅ Raw timestamps available:', rawTimestamps.length > 0 ? 'Yes' : 'No', rawTimestamps.length, 'points');
+        if (baseDayMs == null) {
+          const d = new Date();
+          d.setUTCHours(0, 0, 0, 0);
+          baseDayMs = d.getTime();
+        }
+
+        const startMs = baseDayMs + (centered.startSec * 1000);
+        const endMs = baseDayMs + (centered.endSec * 1000);
+        const centerMs = baseDayMs + (centered.centerSec * 1000);
+
+        if (loadVersion !== loadVersionRef.current) return;
+        setSelectionStart(new Date(startMs));
+        setSelectionEnd(new Date(endMs));
+        setSelectedTime(new Date(centerMs));
         }
         
         // Loading state is managed by processDataInChunks
         return;
       } catch (e: any) {
+        if (loadVersion !== loadVersionRef.current) return;
         // NO FALLBACK TO GENERATED DATA - show empty charts instead
         console.error('❌ Error loading data:', e);
         console.error('Error details:', {
@@ -2966,130 +3118,41 @@ useEffect(() => {
     // Only load if all conditions are met
     console.log('✅ Loading data - modal closed, vehicle and date selected');
     load();
-  }, [selectedVehicleId, selectedDate, selectedShift, showAssetModal, selectedHourRange, screenMode, selectedVehicleSerialNo]); // Reload when vehicle/date/shift/hour range/screen mode changes
+    return () => {
+      controller.abort();
+    };
+  }, [selectedVehicleId, selectedDate, selectedShift, showAssetModal, selectedHourRange, screenMode, selectedVehicleSerialNo, apiRange]); // Reload when vehicle/date/shift/hour range/screen mode/range changes
 
 
-  // Prepare scrubber data - use raw timestamps from API if available, otherwise fallback to generated data
+  // Prepare scrubber data - always use full shift domain (so user can expand selection up to the full shift)
   const scrubberData = useMemo(() => {
-    // Priority 1: Use raw timestamps from API (most accurate)
+    const shiftApi = formatShiftForAPI(selectedShift);
+    const { startSec: shiftStartSec, endSec: shiftEndSec } = parseShiftApiToSeconds(shiftApi);
+
+    // Base day for the timeline: prefer API timestamps (most reliable), otherwise parse selectedDate, otherwise today.
+    let baseDayMs: number | null = null;
     if (rawTimestamps.length > 0) {
-      const data: Array<{ time: number }> = rawTimestamps.map(ts => ({ time: ts }));
-      console.log('✅ Using raw timestamps for scrubber:', data.length, 'points');
-      if (data.length > 0) {
-        console.log('✅ Scrubber time range:', new Date(data[0].time).toISOString(), 'to', new Date(data[data.length - 1].time).toISOString());
-      }
-      return data;
+      const d = new Date(rawTimestamps[0]);
+      d.setUTCHours(0, 0, 0, 0);
+      baseDayMs = d.getTime();
+    } else {
+      baseDayMs = parseDateToUtcDayStartMs(selectedDate);
     }
-    
-    // Priority 2: Use selection range if available
-    if (selectionStart && selectionEnd) {
-      const startTs = selectionStart.getTime();
-      const endTs = selectionEnd.getTime();
-      if (Number.isFinite(startTs) && Number.isFinite(endTs) && startTs < endTs) {
-        const data: Array<{ time: number }> = [];
-        const step = 60 * 1000; // 1 minute resolution
-        for (let t = startTs; t <= endTs; t += step) {
-          data.push({ time: t });
-        }
-        if (data.length === 0 || data[data.length - 1].time !== endTs) data.push({ time: endTs });
-        console.log('✅ Using selection range for scrubber:', data.length, 'points');
-        return data;
-      }
-    }
-    
-    // Priority 3: Fallback to data from charts
-    const candidateStarts: number[] = [];
-    const candidateEnds: number[] = [];
-
-    // Consider all analog series
-    vehicleMetrics.forEach(m => {
-      const first = m.data?.[0]?.time?.getTime?.();
-      const last = m.data?.[m.data.length - 1]?.time?.getTime?.();
-      if (typeof first === 'number') candidateStarts.push(first);
-      if (typeof last === 'number') candidateEnds.push(last);
-    });
-
-    // Consider all digital series
-    digitalStatusChart?.metrics?.forEach(m => {
-      const first = m.data?.[0]?.time?.getTime?.();
-      const last = m.data?.[m.data.length - 1]?.time?.getTime?.();
-      if (typeof first === 'number') candidateStarts.push(first);
-      if (typeof last === 'number') candidateEnds.push(last);
-    });
-
-    if (candidateStarts.length === 0 || candidateEnds.length === 0) {
-      console.warn('⚠️ No chart data available for scrubber, using default 6 AM - 6 PM range');
-      // Fallback to default 6 AM - 6 PM range
-      const baseDate = selectedDate ? new Date(selectedDate) : new Date();
-      const start6AM = new Date(baseDate);
-      start6AM.setHours(6, 0, 0, 0);
-      const end6PM = new Date(baseDate);
-      end6PM.setHours(18, 0, 0, 0);
-      const data: Array<{ time: number }> = [];
-      const step = 60 * 1000; // 1 minute resolution
-      for (let t = start6AM.getTime(); t <= end6PM.getTime(); t += step) {
-        data.push({ time: t });
-      }
-      return data;
+    if (baseDayMs == null) {
+      const d = new Date();
+      d.setUTCHours(0, 0, 0, 0);
+      baseDayMs = d.getTime();
     }
 
-    const startTs = Math.min(...candidateStarts);
-    const endTs = Math.max(...candidateEnds);
-    if (!Number.isFinite(startTs) || !Number.isFinite(endTs) || startTs >= endTs) {
-      console.warn('⚠️ Invalid time range for scrubber, using default 6 AM - 6 PM range');
-      // Fallback to default 6 AM - 6 PM range
-      const baseDate = selectedDate ? new Date(selectedDate) : new Date();
-      const start6AM = new Date(baseDate);
-      start6AM.setHours(6, 0, 0, 0);
-      const end6PM = new Date(baseDate);
-      end6PM.setHours(18, 0, 0, 0);
-      const data: Array<{ time: number }> = [];
-      const step = 60 * 1000; // 1 minute resolution
-      for (let t = start6AM.getTime(); t <= end6PM.getTime(); t += step) {
-        data.push({ time: t });
-      }
-      return data;
+    const domainStart = baseDayMs + (shiftStartSec * 1000);
+    const domainEnd = baseDayMs + (shiftEndSec * 1000);
+    if (!Number.isFinite(domainStart) || !Number.isFinite(domainEnd) || domainStart >= domainEnd) {
+      return [];
     }
 
-    // Generate minute-by-minute data as fallback
-    const data: Array<{ time: number }> = [];
-    const step = 60 * 1000; // 1 minute resolution
-    for (let t = startTs; t <= endTs; t += step) {
-      data.push({ time: t });
-    }
-    if (data.length === 0 || data[data.length - 1].time !== endTs) data.push({ time: endTs });
-    console.log('⚠️ Using generated timestamps for scrubber (fallback):', data.length, 'points');
-    return data;
-  }, [rawTimestamps, vehicleMetrics, digitalStatusChart, selectionStart, selectionEnd, selectedHourRange, selectedDate]);
-
-  // Update selection range when rawTimestamps are available
-  useEffect(() => {
-    if (rawTimestamps.length > 0) {
-      const dataStart = new Date(rawTimestamps[0]);
-      const dataEnd = new Date(rawTimestamps[rawTimestamps.length - 1]);
-      
-      // Always update if timestamps don't match current selection
-      const currentStart = selectionStart?.getTime();
-      const currentEnd = selectionEnd?.getTime();
-      const dataStartTime = dataStart.getTime();
-      const dataEndTime = dataEnd.getTime();
-      
-      if (!selectionStart || !selectionEnd || 
-          Math.abs(currentStart! - dataStartTime) > 1000 || 
-          Math.abs(currentEnd! - dataEndTime) > 1000) {
-        const centerTime = new Date((dataStartTime + dataEndTime) / 2);
-        
-        setSelectionStart(dataStart);
-        setSelectionEnd(dataEnd);
-        setSelectedTime(centerTime);
-        
-        console.log('✅ Updated selection range from rawTimestamps:', 
-          `selectionStart: ${dataStart.toISOString()} (${String(dataStart.getUTCHours()).padStart(2, '0')}:${String(dataStart.getUTCMinutes()).padStart(2, '0')}:${String(dataStart.getUTCSeconds()).padStart(2, '0')} UTC)`,
-          `selectionEnd: ${dataEnd.toISOString()} (${String(dataEnd.getUTCHours()).padStart(2, '0')}:${String(dataEnd.getUTCMinutes()).padStart(2, '0')}:${String(dataEnd.getUTCSeconds()).padStart(2, '0')} UTC)`
-        );
-      }
-    }
-  }, [rawTimestamps]);
+    // Only endpoints are needed; scale/timeDomain drives interaction.
+    return [{ time: domainStart }, { time: domainEnd }];
+  }, [rawTimestamps, selectedDate, selectedShift]);
 
   // Calculate synchronized time domain from selection range
   const timeDomain = useMemo<[number, number] | null>(() => {
@@ -3157,232 +3220,74 @@ useEffect(() => {
     }
   }, []); // Always use minute view settings
 
-  // Handle selection range change from scrubber
-  // Function to fetch table data for a specific time range
-  const fetchTableDataForRange = useCallback(async (
-    startTime: Date,
-    endTime: Date
-  ) => {
-    if (!selectedVehicleSerialNo || !selectedDate || !selectedShift) {
-      console.warn('⚠️ Cannot fetch table data: missing vehicle, date, or shift');
-      return;
-    }
-
-    try {
-      const shiftParam = formatShiftForAPI(selectedShift);
-      const serialNo = selectedVehicleSerialNo || String(selectedVehicleId);
-      
-      // Format start and end times as ISO strings or timestamps
-      // Convert to UTC and format as HH:mm:ss
-      const formatTimeForAPI = (date: Date): string => {
-        const hours = String(date.getUTCHours()).padStart(2, '0');
-        const minutes = String(date.getUTCMinutes()).padStart(2, '0');
-        const seconds = String(date.getUTCSeconds()).padStart(2, '0');
-        return `${hours}:${minutes}:${seconds}`;
-      };
-
-      const startTimeStr = formatTimeForAPI(startTime);
-      const endTimeStr = formatTimeForAPI(endTime);
-
-      let apiUrl: string;
-      if (screenMode === 'Drilling') {
-        apiUrl = `/reet_python/mccullochs/apis/get_drilling_json.php?devices_serial_no=${encodeURIComponent(serialNo)}&date=${encodeURIComponent(selectedDate)}&shift=${encodeURIComponent(shiftParam)}&start_time=${encodeURIComponent(startTimeStr)}&end_time=${encodeURIComponent(endTimeStr)}`;
-        console.log(`📊 [Drilling] Fetching table data for range: ${startTimeStr} to ${endTimeStr}`, apiUrl);
-      } else {
-        // Maintenance mode - ensure start_time and end_time are sent
-        apiUrl = `/reet_python/mccullochs/apis/get_maintenance_json.php?devices_serial_no=${encodeURIComponent(serialNo)}&date=${encodeURIComponent(selectedDate)}&shift=${encodeURIComponent(shiftParam)}&start_time=${encodeURIComponent(startTimeStr)}&end_time=${encodeURIComponent(endTimeStr)}`;
-        console.log(`📊 [Maintenance] Fetching table data for range: ${startTimeStr} to ${endTimeStr}`, apiUrl);
-        console.log(`📊 [Maintenance] Payload: devices_serial_no=${serialNo}, date=${selectedDate}, shift=${shiftParam}, start_time=${startTimeStr}, end_time=${endTimeStr}`);
-      }
-
-      const response = await fetch(apiUrl, {
-        headers: { 'Accept': 'application/json' },
-        cache: 'no-store',
-        mode: 'cors'
-      });
-
-      if (!response.ok) {
-        throw new Error(`Failed to load table data: ${response.status} ${response.statusText}`);
-      }
-
-      const responseText = await response.text();
-      let json: any;
-
-      try {
-        json = JSON.parse(responseText);
-      } catch (parseError) {
-        console.error('❌ Failed to parse table data response as JSON:', parseError);
-        throw new Error('Invalid JSON response from API');
-      }
-
-      // Handle API response structure: { success: true, data: {...} }
-      if (json.success && json.data) {
-        json = json.data;
-      }
-
-      // Update table data based on screen mode
-      if (screenMode === 'Drilling' && json.tableData) {
-        // Process drilling table data
-        let processedTableData: Record<string, { value: number; max: number }> = {};
-        
-        if (Array.isArray(json.tableData)) {
-          json.tableData.forEach((item: any) => {
-            const name = String(item.name || '').trim();
-            const valueStr = String(item.value || '0:00:00').trim();
-            let valueMinutes = 0;
-            
-            try {
-              const parts = valueStr.split(':');
-              if (parts.length >= 2) {
-                const hours = parseInt(parts[0] || '0', 10);
-                const minutes = parseInt(parts[1] || '0', 10);
-                const seconds = parts.length > 2 ? parseInt(parts[2] || '0', 10) : 0;
-                valueMinutes = hours * 60 + minutes + (seconds / 60);
-              }
-            } catch (e) {
-              console.warn('⚠️ Failed to parse value string:', valueStr, e);
-              valueMinutes = 0;
-            }
-
-            // Map API IDs/names to expected table keys
-            const idToOutputName: Record<string, string> = {
-              'PR001': 'DRILLING TIME (OD101)',
-              'PR002': 'CIRCULATING/SURVEY TIME (OD102)',
-              'PR003': 'ROD TRIPPING TIME (OD103)',
-              'PR004': 'IDLE TIME 1 (OD104)',
-              'PR005': 'IDLE TIME 2 (OD105)',
-              'PR006': 'AIRLIFTING (OD106)'
-            };
-
-            const nameMapping: Record<string, string> = {
-              'DRILLNG TIME': 'DRILLING TIME (OD101)',
-              'DRILLING TIME': 'DRILLING TIME (OD101)',
-              'CIRCULATING/SURVEY TI': 'CIRCULATING/SURVEY TIME (OD102)',
-              'CIRCULATING/SURVEY TIME': 'CIRCULATING/SURVEY TIME (OD102)',
-              'ROD TRIPPING TIME': 'ROD TRIPPING TIME (OD103)',
-              'IDLE TIME 1': 'IDLE TIME 1 (OD104)',
-              'IDLE TIME 2': 'IDLE TIME 2 (OD105)',
-              'AIRLIFTING': 'AIRLIFTING (OD106)'
-            };
-
-            const itemId = String(item.id || '').trim();
-            let key = name;
-            
-            if (itemId && idToOutputName[itemId]) {
-              key = idToOutputName[itemId];
-            } else {
-              const nameUpper = name.toUpperCase().trim();
-              if (nameMapping[nameUpper]) {
-                key = nameMapping[nameUpper];
-              } else {
-                const matchedKey = Object.keys(nameMapping).find(mapped => {
-                  const mappedUpper = mapped.toUpperCase();
-                  return nameUpper.includes(mappedUpper) || mappedUpper.includes(nameUpper);
-                });
-                if (matchedKey) {
-                  key = nameMapping[matchedKey];
-                }
-              }
-            }
-
-            processedTableData[key] = {
-              value: valueMinutes,
-              max: 720
-            };
-          });
-        } else if (typeof json.tableData === 'object') {
-          processedTableData = json.tableData;
-        }
-
-        setTableData(processedTableData);
-        console.log('✅ Updated drilling table data for range:', Object.keys(processedTableData).length, 'items');
-      } else if (screenMode === 'Maintenance') {
-        // Process maintenance table data
-        const convertArrayToObject = (arr: any[]): Record<string, { value: number; max: number; unit: string }> => {
-          const result: Record<string, { value: number; max: number; unit: string }> = {};
-          
-          if (!Array.isArray(arr)) {
-            return arr || {};
-          }
-          
-          arr.forEach((item: any) => {
-            const name = String(item.name || '');
-            const valueStr = String(item.value || '0:00:00');
-            const reading = String(item.reading || 'Hours').toUpperCase();
-            
-            let valueMinutes = 0;
-            try {
-              const parts = valueStr.split(':');
-              if (parts.length >= 2) {
-                const hours = parseInt(parts[0] || '0', 10);
-                const minutes = parseInt(parts[1] || '0', 10);
-                const seconds = parts.length > 2 ? parseInt(parts[2] || '0', 10) : 0;
-                valueMinutes = hours * 60 + minutes + (seconds / 60);
-              }
-            } catch (e) {
-              console.warn('⚠️ Failed to parse maintenance value string:', valueStr, e);
-              valueMinutes = 0;
-            }
-            
-            let unit = 'HOURS';
-            if (reading.includes('METERS') || reading.includes('METER')) {
-              unit = 'METERS';
-            } else if (reading.includes('HOURS') || reading.includes('HOUR')) {
-              unit = 'HOURS';
-            }
-            
-            if (name) {
-              result[name] = {
-                value: valueMinutes,
-                max: 720,
-                unit
-              };
-            }
-          });
-          
-          return result;
-        };
-        
-        const processedReportingOutputs = convertArrayToObject(json.reportingOutputs || []);
-        const processedFaultReportingAnalog = convertArrayToObject(json.faultReportingAnalog || []);
-        const processedFaultReportingDigital = convertArrayToObject(json.faultReportingDigital || []);
-        
-        setMaintenanceTablesData({
-          reportingOutputs: processedReportingOutputs,
-          faultReportingAnalog: processedFaultReportingAnalog,
-          faultReportingDigital: processedFaultReportingDigital
-        });
-        console.log('✅ Updated maintenance table data for range:', {
-          reportingOutputs: Object.keys(processedReportingOutputs).length,
-          faultReportingAnalog: Object.keys(processedFaultReportingAnalog).length,
-          faultReportingDigital: Object.keys(processedFaultReportingDigital).length
-        });
-      }
-    } catch (error: any) {
-      console.error('❌ Error fetching table data for range:', error);
-      // Don't show error modal, just log it
-    }
-  }, [selectedVehicleSerialNo, selectedDate, selectedShift, selectedVehicleId, screenMode]);
-
   const handleSelectionChange = useCallback((startTimestamp: number, endTimestamp: number) => {
-    const start = new Date(startTimestamp);
-    const end = new Date(endTimestamp);
-    
-    // In second view mode: enforce MIN 10 minutes range
-    // In minute view mode: enforce MIN 1 hour range
-    const minRangeMs = 60 * 60 * 1000; // Always 1 hour (minute view)
-    const rangeMs = endTimestamp - startTimestamp;
-    const newStart = start;
-    let newEnd = end;
-    if (rangeMs < minRangeMs) {
-      newEnd = new Date(startTimestamp + minRangeMs);
+    // Allow user to expand the range (no max cap). Keep a small minimum range for usability.
+    const minRangeMs = 60 * 60 * 1000; // minimum 1 hour (even in second view mode)
+
+    let startMs = Math.min(startTimestamp, endTimestamp);
+    let endMs = Math.max(startTimestamp, endTimestamp);
+
+    // Enforce minimum range
+    if (endMs - startMs < minRangeMs) {
+      endMs = startMs + minRangeMs;
     }
+
+    // Clamp selection inside the full SHIFT domain (not just loaded timestamps),
+    // so user can expand up to the full shift even if the loaded data window is smaller.
+    const shiftApi = formatShiftForAPI(selectedShift);
+    const { startSec: shiftStartSec, endSec: shiftEndSec } = parseShiftApiToSeconds(shiftApi);
+
+    let baseDayMs: number | null = null;
+    if (rawTimestamps.length > 0) {
+      const d = new Date(rawTimestamps[0]);
+      d.setUTCHours(0, 0, 0, 0);
+      baseDayMs = d.getTime();
+    } else {
+      baseDayMs = parseDateToUtcDayStartMs(selectedDate);
+    }
+    if (baseDayMs == null) {
+      const d = new Date();
+      d.setUTCHours(0, 0, 0, 0);
+      baseDayMs = d.getTime();
+    }
+
+    const domainStart = baseDayMs + (shiftStartSec * 1000);
+    const domainEnd = baseDayMs + (shiftEndSec * 1000);
+    const domainRange = domainEnd - domainStart;
+
+    if (domainRange <= minRangeMs) {
+      startMs = domainStart;
+      endMs = domainEnd;
+    } else {
+      if (startMs < domainStart) startMs = domainStart;
+      if (endMs > domainEnd) endMs = domainEnd;
+
+      // Re-apply min range after clamping
+      if (endMs - startMs < minRangeMs) {
+        if (startMs + minRangeMs <= domainEnd) {
+          endMs = startMs + minRangeMs;
+        } else {
+          startMs = domainEnd - minRangeMs;
+          endMs = domainEnd;
+        }
+      }
+    }
+
+    const newStart = new Date(startMs);
+    const newEnd = new Date(endMs);
+
     setSelectionStart(newStart);
     setSelectionEnd(newEnd);
-    
-    // Update selected time to center of range if needed
-    const centerTime = new Date((newStart.getTime() + newEnd.getTime()) / 2);
-    setSelectedTime(centerTime);
+
+    // Keep selected time inside the visible window (don’t force recenter every time).
+    const current = selectedTime?.getTime?.() ?? null;
+    if (current == null) {
+      setSelectedTime(new Date(Math.floor((startMs + endMs) / 2)));
+    } else if (current < startMs) {
+      setSelectedTime(new Date(startMs));
+    } else if (current > endMs) {
+      setSelectedTime(new Date(endMs));
+    }
 
     // Debounce API call to avoid too many requests while dragging
     // Clear any pending timeout
@@ -3392,9 +3297,10 @@ useEffect(() => {
 
     // Set a new timeout to fetch table data after user stops dragging (500ms delay)
     rangeChangeTimeoutRef.current = setTimeout(() => {
-      fetchTableDataForRange(newStart, newEnd);
+      // Trigger full data reload (charts + tables) for the selected range.
+      setApiRange({ startMs, endMs });
     }, 500);
-  }, [fetchTableDataForRange]); // Always use minute view settings
+  }, [isSecondViewMode, rawTimestamps, selectedTime, setSelectedTime, selectedShift, selectedDate]);
 
   // Handle hover from scrubber
   const handleHover = useCallback((_timestamp: number | null) => {
@@ -3441,7 +3347,7 @@ useEffect(() => {
             onTimeChange={handleTimeChange}
             onSelectionChange={handleSelectionChange}
             onHover={handleHover}
-            isSecondViewMode={false}
+            isSecondViewMode={isSecondViewMode}
             showVehiclePointer={screenMode === 'Drilling'}
           />
         )}
@@ -3482,7 +3388,7 @@ useEffect(() => {
                 selectedTime={selectedTime}
                 crosshairActive={crosshairActive}
                 timeDomain={timeDomain}
-                      isSecondViewMode={false}
+                isSecondViewMode={isSecondViewMode}
               />
             )}
           </div>
@@ -3521,26 +3427,6 @@ useEffect(() => {
               }
               return filtered;
             })().map(metric => {
-              // 🔍 DEBUG: Log what we're passing to AnalogChart during render
-              console.log(`📤 Rendering AnalogChart [${metric.id}]:`, {
-                id: metric.id,
-                name: metric.name,
-                dataPointsCount: metric.data?.length || 0,
-                dataType: Array.isArray(metric.data) ? 'array' : typeof metric.data,
-                firstDataPoint: metric.data && metric.data.length > 0 ? {
-                  time: metric.data[0].time,
-                  avg: metric.data[0].avg,
-                  min: metric.data[0].min,
-                  max: metric.data[0].max
-                } : null,
-                min_color: metric.min_color,
-                max_color: metric.max_color,
-                hasMinColor: !!metric.min_color,
-                hasMaxColor: !!metric.max_color,
-                yAxisRange: metric.yAxisRange,
-                timeDomain
-              });
-              
               return (
                 <AnalogChart
                   key={metric.id}
@@ -3555,7 +3441,7 @@ useEffect(() => {
                   selectedTime={selectedTime}
                   crosshairActive={crosshairActive}
                   timeDomain={timeDomain}
-                  isSecondViewMode={false}
+                  isSecondViewMode={isSecondViewMode}
                 />
               );
             })}

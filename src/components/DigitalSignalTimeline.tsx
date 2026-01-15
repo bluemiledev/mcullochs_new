@@ -8,7 +8,6 @@ import {
   ReferenceLine,
   ResponsiveContainer
 } from 'recharts';
-import { format } from 'date-fns';
 import styles from './DigitalSignalTimeline.module.css';
 
 interface DigitalSignalData {
@@ -29,7 +28,7 @@ interface DigitalSignalTimelineProps {
 
 interface ChartDataPoint {
   time: number; // Timestamp for Recharts time scale
-  [key: string]: number | undefined;
+  [key: string]: number | null | undefined;
 }
 
 const DigitalSignalTimeline: React.FC<DigitalSignalTimelineProps> = ({
@@ -74,149 +73,70 @@ const DigitalSignalTimeline: React.FC<DigitalSignalTimelineProps> = ({
     return desired; // No max cap - show all signals
   }, [signals.length, windowWidth]);
   const chartData = useMemo(() => {
-    if (!signals.length || !signals[0].data.length) return [];
+    if (!signals.length) return [];
 
-    // Determine visible range
+    // Determine visible range (with padding)
     const PAD = 5 * 60 * 1000; // 5 min padding
     const [startTs, endTs] = timeDomain || [Number.NEGATIVE_INFINITY, Number.POSITIVE_INFINITY];
     const lo = startTs - PAD;
     const hi = endTs + PAD;
 
-    // Collect ALL unique timestamps from ALL signals (no decimation)
+    // Gap detection bucket (second view: 1s, minute view: 60s)
+    const EXPECTED_INTERVAL = isSecondViewMode ? 1000 : 60 * 1000;
+    const MAX_GAP = isSecondViewMode ? 2 * 1000 : 2 * 60 * 1000;
+
+    // Build O(1) lookup for each signal and collect all unique timestamps in range.
     const allTimesSet = new Set<number>();
-    signals.forEach(signal => {
-      signal.data.forEach(d => {
+    const valueBySignal: Record<string, Map<number, number>> = {};
+
+    for (const signal of signals) {
+      const map = new Map<number, number>();
+      const timesArr: number[] = [];
+
+      for (const d of signal.data) {
         const t = d.time.getTime();
-        if (t >= lo && t <= hi) {
-          allTimesSet.add(t);
-        }
-      });
-    });
+        if (t < lo || t > hi) continue;
+        const v = Number((d as any).value ?? 0);
+        map.set(t, v);
+        timesArr.push(t);
+        allTimesSet.add(t);
+      }
 
-    // Convert to sorted array
-    const allTimes = Array.from(allTimesSet).sort((a, b) => a - b);
+      timesArr.sort((a, b) => a - b);
 
-    // Build data points using EXACT API values ONLY - no interpolation, no nearest neighbor
-    // Show exact value (0 = OFF, 1 = ON) at exact time from API
-    const dataMap = new Map<number, ChartDataPoint>();
-    
-    // Console log all API data for verification
-    console.group('📊 Digital Chart: API Data - Exact Values by Time');
-    signals.forEach((signal, signalIndex) => {
-      console.log(`Signal ${signalIndex + 1}: ${signal.name} (${signal.id})`, {
-        totalPoints: signal.data.length,
-        dataPoints: signal.data.map(d => ({
-          time: format(d.time, 'HH:mm:ss'),
-          timestamp: d.time.getTime(),
-          value: d.value,
-          status: d.value === 1 ? 'ON' : 'OFF'
-        }))
-      });
-    });
-    console.groupEnd();
-    
-    allTimes.forEach(t => {
-      const point: ChartDataPoint = { time: t };
-      signals.forEach((signal, index) => {
-        // ONLY use exact match - no fallback to closest point
-        // This ensures we show exact API value at exact time
-        const exactMatch = signal.data.find(d => d.time.getTime() === t);
-        if (exactMatch) {
-          // Use exact API value: 1 = ON (upper position at index + 3.5), 0 = OFF (lower position at index + 3.0)
-          const apiValue = Number(exactMatch.value);
-          point[signal.id] = apiValue === 1 ? index + 3.5 : index + 3.0;
-        } else {
-          // If no exact match, set to null (not undefined) so line breaks at missing data
-          point[signal.id] = null as any;
-        }
-      });
-      dataMap.set(t, point);
-    });
-    
-    // Console log processed chart data for verification
-    console.group('📊 Digital Chart: Processed Chart Data - Exact Time Points');
-    const processedData = Array.from(dataMap.values()).sort((a, b) => a.time! - b.time!);
-    console.log('Total time points in chart:', processedData.length);
-    console.log('Sample points (first 10):', processedData.slice(0, 10).map(p => ({
-      time: format(new Date(p.time!), 'HH:mm:ss'),
-      timestamp: p.time,
-      signals: signals.map((s, sigIdx) => {
-        const yPos = p[s.id];
-        const expectedOnPos = sigIdx + 3.5;  // ON is upper position
-        const expectedOffPos = sigIdx + 3.0;  // OFF is lower position
-        let value = 'NO DATA';
-        if (yPos !== undefined) {
-          value = Math.abs(yPos - expectedOnPos) < 0.1 ? 'ON (1)' : 'OFF (0)';
-        }
-        return {
-          id: s.id,
-          name: s.name,
-         value,
-          yPosition: yPos
-        };
-      })
-    })));
-    console.groupEnd();
-
-    // Detect time gaps for each signal and insert null points to break the line
-    // Expected interval is 1 minute (60000 ms), but allow up to 2 minutes before breaking
-    const EXPECTED_INTERVAL = 60 * 1000; // 1 minute
-    const MAX_GAP = 2 * 60 * 1000; // 2 minutes - if gap is larger, insert null point
-    
-    // For each signal, check for gaps in its data and insert null points
-    signals.forEach((signal, signalIndex) => {
-      const signalData = signal.data
-        .filter(d => {
-          const t = d.time.getTime();
-          return t >= lo && t <= hi;
-        })
-        .sort((a, b) => a.time.getTime() - b.time.getTime());
-      
-      // Check for gaps in this signal's data
-      for (let i = 0; i < signalData.length - 1; i++) {
-        const current = signalData[i];
-        const next = signalData[i + 1];
-        const gap = next.time.getTime() - current.time.getTime();
-        
-        // If gap is larger than threshold, insert null points to break the line
+      // Insert a single break point after a large gap so step lines don't connect across missing data.
+      for (let i = 0; i < timesArr.length - 1; i++) {
+        const gap = timesArr[i + 1] - timesArr[i];
         if (gap >= MAX_GAP) {
-          // Insert null point at expected next interval time
-          const nullPointTime = current.time.getTime() + EXPECTED_INTERVAL;
-          
-          // Check if this time point already exists (another signal might have data here)
-          if (!dataMap.has(nullPointTime)) {
-            // Create new null point - check if other signals have data at this time
-            const nullPoint: ChartDataPoint = { time: nullPointTime };
-            signals.forEach((s, idx) => {
-              // Check if this signal has data at nullPointTime
-              const exactMatch = s.data.find(d => d.time.getTime() === nullPointTime);
-              if (exactMatch) {
-                // This signal has data, use it
-                const apiValue = Number(exactMatch.value);
-                nullPoint[s.id] = apiValue === 1 ? idx + 3.5 : idx + 3.0;
-              } else {
-                // No data for this signal, set to null
-                nullPoint[s.id] = null as any;
-              }
-            });
-            dataMap.set(nullPointTime, nullPoint);
-            allTimesSet.add(nullPointTime);
-          } else {
-            // Point already exists - just update this signal to null if it doesn't have data
-            const existingPoint = dataMap.get(nullPointTime)!;
-            const exactMatch = signal.data.find(d => d.time.getTime() === nullPointTime);
-            if (!exactMatch) {
-              // This signal doesn't have data at this time, set to null
-              existingPoint[signal.id] = null as any;
-            }
-          }
+          allTimesSet.add(timesArr[i] + EXPECTED_INTERVAL);
         }
       }
-    });
-    
-    // Return sorted by timestamp (already sorted from allTimes, but ensure)
-    return Array.from(dataMap.values()).sort((a, b) => a.time! - b.time!);
-  }, [signals, timeDomain]);
+
+      valueBySignal[signal.id] = map;
+    }
+
+    const allTimes = Array.from(allTimesSet).sort((a, b) => a - b);
+    if (!allTimes.length) return [];
+
+    // Build chart data with exact values only (no interpolation).
+    const result: ChartDataPoint[] = new Array(allTimes.length);
+    for (let ti = 0; ti < allTimes.length; ti++) {
+      const t = allTimes[ti];
+      const point: ChartDataPoint = { time: t };
+      for (let si = 0; si < signals.length; si++) {
+        const s = signals[si];
+        const v = valueBySignal[s.id]?.get(t);
+        if (v === undefined) {
+          point[s.id] = null;
+        } else {
+          point[s.id] = v === 1 ? si + 3.5 : si + 3.0;
+        }
+      }
+      result[ti] = point;
+    }
+
+    return result;
+  }, [signals, timeDomain, isSecondViewMode]);
 
   const formatTime = (tickItem: number) => {
     // Keep time formatting consistent with the TimeScrubber (UTC)

@@ -92,15 +92,7 @@ const TimeScrubber: React.FC<TimeScrubberProps> = ({
 
   const clampToDay = (t: number) => Math.max(timeDomain[0], Math.min(timeDomain[1], t));
 
-  const enforceMaxHour = (start: number, end: number): [number, number] => {
-    // In second view mode: max range is 10 minutes
-    // In minute view mode: max range is 1 hour
-    const maxRangeMs = isSecondViewMode ? (10 * 60 * 1000) : (60 * 60 * 1000);
-    if (end - start > maxRangeMs) {
-      return [start, start + maxRangeMs];
-    }
-    return [start, end];
-  };
+  // Note: max range is no longer capped here (user can expand up to the full data domain).
 
   const rafRef = useRef<number | null>(null);
   const lastEmittedRef = useRef<number | null>(null);
@@ -121,14 +113,12 @@ const TimeScrubber: React.FC<TimeScrubberProps> = ({
       // Hover should only update the visual indicator, not the actual selected time
       if (isDraggingRef.current && dragMode) {
         if (dragMode === 'left' && selectionEnd !== null) {
-          const [s, e2] = enforceMaxHour(time, selectionEnd);
-          const start = Math.min(s, e2);
-          const end = Math.max(s, e2);
+          const start = Math.min(time, selectionEnd);
+          const end = Math.max(time, selectionEnd);
           onSelectionChange(start, end);
         } else if (dragMode === 'right' && selectionStart !== null) {
-          const [s, e2] = enforceMaxHour(selectionStart, time);
-          const start = Math.min(s, e2);
-          const end = Math.max(s, e2);
+          const start = Math.min(selectionStart, time);
+          const end = Math.max(selectionStart, time);
           onSelectionChange(start, end);
         } else if (dragMode === 'range' && selectionStart !== null && selectionEnd !== null) {
           const width = selectionEnd - selectionStart;
@@ -180,10 +170,13 @@ const TimeScrubber: React.FC<TimeScrubberProps> = ({
     } else if (selectionStart !== null && selectionEnd !== null && time >= Math.min(selectionStart, selectionEnd) && time <= Math.max(selectionStart, selectionEnd)) {
       setDragMode('range');
     } else {
-      // In second view mode: default range is 10 minutes
-      // In minute view mode: default range is 1 hour
-      const defaultMs = isSecondViewMode ? (10 * 60 * 1000) : (60 * 60 * 1000);
-      const width = selectionStart !== null && selectionEnd !== null ? Math.max(1, Math.min(defaultMs, Math.abs(selectionEnd - selectionStart))) : defaultMs;
+      // Default range is 1 hour
+      const defaultMs = 60 * 60 * 1000;
+      // Preserve current selection width when possible (don't cap it), otherwise fall back to defaults.
+      const currentWidth =
+        selectionStart !== null && selectionEnd !== null ? Math.max(1, Math.abs(selectionEnd - selectionStart)) : null;
+      const maxWidth = Math.max(1, timeDomain[1] - timeDomain[0]);
+      const width = Math.min(maxWidth, currentWidth ?? defaultMs);
       let newStart = clampToDay(time - Math.floor(width / 2));
       let newEnd = newStart + width;
       if (newEnd > timeDomain[1]) {
@@ -368,9 +361,8 @@ const TimeScrubber: React.FC<TimeScrubberProps> = ({
     window.addEventListener('mouseup', onUp);
   };
 
-  // In second view mode: min range is 10 minutes
-  // In minute view mode: min range is 1 hour
-  const MIN_RANGE = isSecondViewMode ? (10 * 60 * 1000) : (60 * 60 * 1000);
+  // Minimum selection range: 1 hour (even in second view mode)
+  const MIN_RANGE = 60 * 60 * 1000;
 
   const onLeftHandleMouseDown = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -390,7 +382,7 @@ const TimeScrubber: React.FC<TimeScrubberProps> = ({
         rafId = null;
         let newStart = timeFromClientX(ev.clientX);
         const end = selectionEnd ?? timeDomain[1];
-        // Enforce minimum range (10 minutes in second view, 1 hour in minute view)
+    // Enforce minimum range (1 hour)
         if (end - newStart < MIN_RANGE) {
           newStart = end - MIN_RANGE;
         }
@@ -437,7 +429,7 @@ const TimeScrubber: React.FC<TimeScrubberProps> = ({
       rafId = requestAnimationFrame(() => {
         rafId = null;
         let newEnd = timeFromClientX(ev.clientX);
-        // Enforce minimum range
+        // Enforce minimum range (1 hour)
         if (newEnd - start < MIN_RANGE) {
           newEnd = start + MIN_RANGE;
         }
@@ -550,24 +542,6 @@ const TimeScrubber: React.FC<TimeScrubberProps> = ({
               <div className={styles.vehiclePointerIcon} />
             </div>
           )}
-          {(() => {
-            console.log('🔍 TimeScrubber render - leftHandlePx:', leftHandlePx, 'selectionStart:', selectionStart, 'rightHandlePx:', rightHandlePx, 'selectionEnd:', selectionEnd, 'overlayWidth:', overlayWidth, 'timeDomain:', timeDomain);
-            return null;
-          })()}
-          {(() => {
-            if (leftHandlePx !== null || rightHandlePx !== null) {
-              console.log('🔍 TimeScrubber handles:', {
-                leftHandlePx,
-                rightHandlePx,
-                selectionStart,
-                selectionEnd,
-                overlayWidth,
-                timeDomain,
-                dataLength: data.length
-              });
-            }
-            return null;
-          })()}
           {leftHandlePx !== null && selectionStart !== null && (
             <div
               className={styles.rangeHandle}

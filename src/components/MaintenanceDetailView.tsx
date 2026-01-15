@@ -13,7 +13,7 @@ interface MaintenanceDetailViewProps {
   instances?: Instance[];
 }
 
-const ITEMS_PER_PAGE = 10;
+const ITEMS_PER_PAGE = 25;
 
 const MaintenanceDetailView: React.FC<MaintenanceDetailViewProps> = ({
   isOpen,
@@ -73,7 +73,7 @@ const MaintenanceDetailView: React.FC<MaintenanceDetailViewProps> = ({
             <div className={styles.summaryValue}>{stats.meetsCriteria}</div>
           </div>
           <div className={styles.summaryBox}>
-            <div className={styles.summaryLabel}>Falls Criteria</div>
+            <div className={styles.summaryLabel}>Fails Criteria</div>
             <div className={styles.summaryValue}>{stats.fallsCriteria}</div>
           </div>
         </div>
