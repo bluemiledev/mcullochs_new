@@ -1113,17 +1113,16 @@ useEffect(() => {
         
         // LOAD FROM API BASED ON SCREEN MODE (using proxy to avoid CORS)
         // Always send start_time/end_time:
-        // - Initial load: 1 hour window centered on shift (scrubber center)
+        // - Initial load: full shift range (shift start to shift end)
         // - Range change: selected range from scrubber
         const shiftParamForApi = formatShiftForAPI(selectedShift);
         const { startSec: shiftStartSec, endSec: shiftEndSec } = parseShiftApiToSeconds(shiftParamForApi);
-        const centered = getCenteredWindowSeconds(shiftStartSec, shiftEndSec, 60 * 60); // 1 hour
         const startTimeStr = apiRange
           ? formatDateUtcToHms(new Date(apiRange.startMs))
-          : formatSecondsToHms(centered.startSec);
+          : formatSecondsToHms(shiftStartSec);
         const endTimeStr = apiRange
           ? formatDateUtcToHms(new Date(apiRange.endMs))
-          : formatSecondsToHms(centered.endSec);
+          : formatSecondsToHms(shiftEndSec);
 
         let apiUrl: string;
         if (screenMode === 'Drilling') {
@@ -3040,11 +3039,11 @@ useEffect(() => {
             }
           });
         }
-        // Set initial selection window: 1 hour centered on the scrubber (shift center).
-        // This matches the initial API request start_time/end_time.
+        // Set initial selection window: full shift range (e.g., 6 AM to 6 PM).
+        // The API call uses a 1-hour centered window, but the scrubber shows the full shift.
         const shiftApi = formatShiftForAPI(selectedShift);
         const { startSec: shiftStartSec, endSec: shiftEndSec } = parseShiftApiToSeconds(shiftApi);
-        const centered = getCenteredWindowSeconds(shiftStartSec, shiftEndSec, 60 * 60); // 1 hour
+        const shiftCenterSec = Math.floor((shiftStartSec + shiftEndSec) / 2);
 
         // Base day: prefer API timestamps (most reliable), otherwise parse selectedDate, otherwise today.
         let baseDayMs: number | null = null;
@@ -3062,9 +3061,10 @@ useEffect(() => {
           baseDayMs = d.getTime();
         }
 
-        const startMs = baseDayMs + (centered.startSec * 1000);
-        const endMs = baseDayMs + (centered.endSec * 1000);
-        const centerMs = baseDayMs + (centered.centerSec * 1000);
+        // Full shift range for scrubber display
+        const startMs = baseDayMs + (shiftStartSec * 1000);
+        const endMs = baseDayMs + (shiftEndSec * 1000);
+        const centerMs = baseDayMs + (shiftCenterSec * 1000);
 
         if (loadVersion !== loadVersionRef.current) return;
         setSelectionStart(new Date(startMs));

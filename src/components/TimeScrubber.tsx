@@ -267,28 +267,18 @@ const TimeScrubber: React.FC<TimeScrubberProps> = ({
     return pos;
   }, [positionForTime, selectionEnd]);
 
-  // Dynamic ticks based on data range: 30 minutes for 12 hours, 1 hour for 24 hours
-  // In second view mode, use smaller intervals (every 5 minutes)
+  // Ticks: always use 30-minute intervals aligned to half-hour boundaries
+  // (so labels are 06:00, 06:30, 07:00, 07:30, ... and never 06:20, 06:45, etc.)
   const ticks = useMemo(() => {
     if (!timeDomain) return undefined;
     const [start, end] = timeDomain;
-    const dataRangeHours = (end - start) / (60 * 60 * 1000);
     
-    if (isSecondViewMode) {
-      // In second view mode, show ticks every 5 minutes for better readability
-      const step = 5 * 60 * 1000; // 5 minutes
-      const alignedStart = Math.floor(start / step) * step;
-      const arr: number[] = [];
-      for (let t = alignedStart; t <= end; t += step) arr.push(t);
-      return arr;
-    }
-    
-    // Use 30-minute intervals for 12-hour data, 1-hour intervals for 24-hour data
-    const step = dataRangeHours <= 12 ? (30 * 60 * 1000) : (60 * 60 * 1000);
-    
-    const alignedStart = Math.floor(start / step) * step;
+    // Always use 30-minute intervals starting from half-hour boundaries (6:00, 6:30, 7:00, 7:30, etc.)
+    const step = 30 * 60 * 1000; // 30 minutes
+    // Start at the first 30-minute boundary at or after start
+    const tickStart = Math.ceil(start / step) * step;
     const arr: number[] = [];
-    for (let t = alignedStart; t <= end; t += step) arr.push(t);
+    for (let t = tickStart; t <= end; t += step) arr.push(t);
     return arr;
   }, [timeDomain, isSecondViewMode]);
 
