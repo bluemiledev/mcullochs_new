@@ -1,16 +1,79 @@
 import { useCallback, useRef } from 'react';
 import { processRawData, getWindowedData, clearDataCache } from '../utils/dataProcessor';
 
+// Type definitions matching the return type of getWindowedData
+interface WindowedAnalogMetric {
+  id: string;
+  name: string;
+  unit: string;
+  color: string;
+  min_color?: string;
+  max_color?: string;
+  currentValue: number;
+  avg: number;
+  min: number;
+  max: number;
+  yAxisRange: { min: number; max: number };
+  resolution: number;
+  offset: number;
+  data: Array<{ time: Date; avg: number | null; min: number | null; max: number | null }>;
+}
+
+interface WindowedDigitalMetric {
+  id: string;
+  name: string;
+  color: string;
+  currentValue: number;
+  data: Array<{ time: Date; value: number }>;
+}
+
 interface ProcessedData {
-  analogMetrics: any[];
-  digitalMetrics: any[];
-  gpsData: any[];
+  analogMetrics: WindowedAnalogMetric[];
+  digitalMetrics: WindowedDigitalMetric[];
+  gpsData: Array<{ time: number; lat: number; lng: number }>;
   timestamps: number[];
+}
+
+interface RawData {
+  analogPerSecond?: Array<{
+    id: string | number;
+    name?: string;
+    unit?: string;
+    color?: string;
+    min_color?: string;
+    max_color?: string;
+    resolution?: number;
+    offset?: number;
+    yAxisRange?: { min: number; max: number };
+    display?: boolean;
+    points?: Array<{
+      time: string;
+      avg?: number | null;
+      min?: number | null;
+      max?: number | null;
+      value?: number | null;
+    }>;
+  }>;
+  digitalPerSecond?: Array<{
+    id: string | number;
+    name?: string;
+    color?: string;
+    display?: boolean;
+    points?: Array<{
+      time: string;
+      value?: number | null;
+    }>;
+  }>;
+  gpsData?: Array<{
+    time: string;
+    lat: number;
+    lng: number;
+  }>;
 }
 
 interface UseDataProcessorReturn {
   processData: (
-    rawData: any,
+    rawData: RawData,
     selectedDate: string,
     isSecondView: boolean,
     windowStart?: number,
@@ -30,7 +93,7 @@ export const useDataProcessor = (): UseDataProcessorReturn => {
   const processingRef = useRef<boolean>(false);
 
   // Process data asynchronously using requestAnimationFrame to avoid blocking UI
-  const processDataAsync = (fn: () => ProcessedData): Promise<ProcessedData> => {
+  const processDataAsync = useCallback((fn: () => ProcessedData): Promise<ProcessedData> => {
     return new Promise((resolve) => {
       if (processingRef.current) {
         // If already processing, queue this request
@@ -52,11 +115,11 @@ export const useDataProcessor = (): UseDataProcessorReturn => {
         }
       });
     });
-  };
+  }, []);
 
   const processData = useCallback(
     (
-      rawData: any,
+      rawData: RawData,
       selectedDate: string,
       isSecondView: boolean,
       windowStart?: number,
@@ -87,7 +150,7 @@ export const useDataProcessor = (): UseDataProcessorReturn => {
         }
       });
     },
-    []
+    [processDataAsync]
   );
 
   const getWindow = useCallback(
@@ -96,7 +159,7 @@ export const useDataProcessor = (): UseDataProcessorReturn => {
         return getWindowedData(windowStart, windowEnd, isSecondView);
       });
     },
-    []
+    [processDataAsync]
   );
 
   const clearCache = useCallback(() => {
