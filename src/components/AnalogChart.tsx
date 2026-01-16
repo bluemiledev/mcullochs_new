@@ -8,7 +8,6 @@ import {
   CartesianGrid,
   ReferenceLine,
   ResponsiveContainer,
-  Cell,
 } from 'recharts';
 import styles from './AnalogChart.module.css';
 
@@ -52,6 +51,7 @@ const AnalogChart: React.FC<AnalogChartProps> = ({
 }) => {
   // 🔍 DEBUG: Log data received by AnalogChart component
   React.useEffect(() => {
+    // eslint-disable-next-line no-console
     console.log(`🔍 AnalogChart [${id}] received data:`, {
       id,
       name,
@@ -73,7 +73,7 @@ const AnalogChart: React.FC<AnalogChartProps> = ({
         timeType: typeof data[data.length - 1].time,
         timeValue: data[data.length - 1].time instanceof Date ? data[data.length - 1].time.toISOString() : data[data.length - 1].time
       } : null,
-      sampleDataPoints: data && data.length > 0 ? data.slice(0, 3).map((d: any) => ({
+      sampleDataPoints: data && data.length > 0 ? data.slice(0, 3).map((d: { time: Date; avg?: number | null; min?: number | null; max?: number | null }) => ({
         time: d.time instanceof Date ? d.time.toISOString() : d.time,
         avg: d.avg,
         min: d.min,
@@ -97,7 +97,7 @@ const AnalogChart: React.FC<AnalogChartProps> = ({
     
     // Convert data points to chart format using EXACT API values (no decimation, no smoothing)
     // Use null for missing avg/min/max values so line doesn't connect through missing data
-    const toPoint = (d: any): ChartPoint => {
+    const toPoint = (d: { time: Date; avg?: number | null; min?: number | null; max?: number | null; value?: number | null }): ChartPoint => {
       // Check if data point has valid avg value
       const avgRaw = d.avg ?? d.value;
       const minRaw = d.min;
@@ -134,6 +134,7 @@ const AnalogChart: React.FC<AnalogChartProps> = ({
     const filtered: ChartPoint[] = (() => {
       if (!timeDomain) {
         const allPoints = data.map(toPoint);
+        // eslint-disable-next-line no-console
         console.log(`🔍 AnalogChart [${id}] No timeDomain - using all ${allPoints.length} points`);
         return allPoints;
       }
@@ -149,6 +150,7 @@ const AnalogChart: React.FC<AnalogChartProps> = ({
         lastISO: data[data.length - 1].time.toISOString()
       } : null;
       
+      // eslint-disable-next-line no-console
       console.log(`🔍 AnalogChart [${id}] Filtering with timeDomain:`, {
         timeDomainStart: new Date(start).toISOString(),
         timeDomainEnd: new Date(end).toISOString(),
@@ -162,7 +164,7 @@ const AnalogChart: React.FC<AnalogChartProps> = ({
       
       // Enhanced filtering with better debugging for overnight shifts
       const filteredData = data
-        .filter((d: any) => {
+        .filter((d: { time: Date; avg?: number | null; min?: number | null; max?: number | null }) => {
           const t = d.time.getTime();
           const inRange = t >= lo && t <= hi;
           
