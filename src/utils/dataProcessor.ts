@@ -79,7 +79,9 @@ interface RawData {
 // Cache for processed data
 let cachedProcessedData: ProcessedData | null = null;
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars, no-unused-vars
 let cachedRawData: RawData | null = null;
+// eslint-disable-next-line @typescript-eslint/no-unused-vars, no-unused-vars
 let cachedSelectedDate: string = '';
 
 // Helper to parse time string to timestamp

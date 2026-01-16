@@ -7,11 +7,8 @@ export interface Instance {
 }
 
 // Generate mock instances for a given output name
-export const getMockInstances = (outputName: string): Instance[] => {
+export const getMockInstances = (_outputName: string): Instance[] => {
   // Generate 24 random instances as shown in the image
-  const instances: Instance[] = [];
-  const baseHour = 6; // Start from 6 AM
-  const baseMinute = 17;
   
   // Sample times and values based on the image pattern
   // Adjusted to match: 10 meets criteria, 14 falls criteria (threshold: >380)
