@@ -160,30 +160,91 @@ const AnalogChart: React.FC<AnalogChartProps> = ({
         totalDataPoints: data.length
       });
       
+      // Enhanced filtering with better debugging for overnight shifts
       const filteredData = data
         .filter((d: any) => {
           const t = d.time.getTime();
           const inRange = t >= lo && t <= hi;
-          if (!inRange && data.indexOf(d) < 3) {
-            console.log(`🔍 Point filtered out:`, {
+          
+          // Debug points that are close to the boundaries (especially after midnight)
+          const isAfterMidnight = t > start + 18 * 3600 * 1000; // More than 18 hours after start (likely after midnight)
+          if (!inRange && (data.indexOf(d) < 10 || isAfterMidnight)) {
+            console.log(`🔍 Point filtered out [${id}]:`, {
               time: d.time.toISOString(),
               timestamp: t,
               lo: new Date(lo).toISOString(),
               hi: new Date(hi).toISOString(),
-              inRange: false
+              loTs: lo,
+              hiTs: hi,
+              pointTs: t,
+              inRange: false,
+              isAfterMidnight,
+              diffFromLo: t - lo,
+              diffFromHi: hi - t
             });
           }
+          
+          // Also log points that ARE in range but are after midnight (to verify they're included)
+          if (inRange && isAfterMidnight && data.indexOf(d) < 5) {
+            console.log(`✅ Point INCLUDED after midnight [${id}]:`, {
+              time: d.time.toISOString(),
+              timestamp: t,
+              avg: d.avg
+            });
+          }
+          
           return inRange;
         })
         .map(toPoint);
       
+      // Check for data points after midnight (for overnight shifts)
+      // Note: filteredData has already been processed by toPoint, so d.time is a number (timestamp), not a Date
+      const pointsAfterMidnight = filteredData.filter((d: ChartPoint) => {
+        const t = d.time; // d.time is already a number (timestamp) according to ChartPoint type
+        // Check if timestamp is in the "next day" portion (24+ hours from base)
+        // For overnight shifts, these should be included
+        const baseDay = Math.floor(t / (24 * 3600 * 1000)) * (24 * 3600 * 1000);
+        const timeOfDay = t - baseDay;
+        // If time is in early morning (00:00:00 to 06:00:00) but timestamp is > 24 hours from base, it's adjusted
+        return timeOfDay < 6 * 3600 * 1000 && t > baseDay + 24 * 3600 * 1000;
+      });
+      
+      // Find the transition point (last point before midnight, first point after)
+      const lastBeforeMidnight = filteredData.filter((d: ChartPoint) => {
+        const hours = new Date(d.time).getUTCHours();
+        return hours >= 18 && hours <= 23;
+      });
+      const firstAfterMidnight = filteredData.filter((d: ChartPoint) => {
+        const hours = new Date(d.time).getUTCHours();
+        return hours >= 0 && hours <= 6;
+      });
+      
       console.log(`🔍 AnalogChart [${id}] Filtered result:`, {
         originalCount: data.length,
         filteredCount: filteredData.length,
+        pointsAfterMidnight: pointsAfterMidnight.length,
+        lastBeforeMidnightCount: lastBeforeMidnight.length,
+        firstAfterMidnightCount: firstAfterMidnight.length,
         firstFiltered: filteredData.length > 0 ? {
           time: new Date(filteredData[0].time).toISOString(),
           avg: filteredData[0].avg
-        } : null
+        } : null,
+        lastFiltered: filteredData.length > 0 ? {
+          time: new Date(filteredData[filteredData.length - 1].time).toISOString(),
+          avg: filteredData[filteredData.length - 1].avg
+        } : null,
+        lastBeforeMidnight: lastBeforeMidnight.length > 0 ? {
+          time: new Date(lastBeforeMidnight[lastBeforeMidnight.length - 1].time).toISOString(),
+          avg: lastBeforeMidnight[lastBeforeMidnight.length - 1].avg
+        } : null,
+        firstAfterMidnight: firstAfterMidnight.length > 0 ? {
+          time: new Date(firstAfterMidnight[0].time).toISOString(),
+          avg: firstAfterMidnight[0].avg
+        } : null,
+        sampleAfterMidnight: pointsAfterMidnight.slice(0, 5).map((d: ChartPoint) => ({
+          time: new Date(d.time).toISOString(),
+          avg: d.avg
+        }))
       });
       
       // 🔍 FIX: If filtering removed all data, fall back to showing all data
@@ -193,6 +254,39 @@ const AnalogChart: React.FC<AnalogChartProps> = ({
         console.warn(`⚠️ This suggests a timeDomain mismatch. TimeDomain: ${new Date(start).toISOString()} to ${new Date(end).toISOString()}, Data range: ${dataTimeRange?.firstISO} to ${dataTimeRange?.lastISO}`);
         // Return all data points instead of empty array
         return data.map(toPoint);
+      }
+      
+      // 🔍 CRITICAL FIX: For overnight shifts, ensure data points after midnight are included
+      // Even if they're slightly outside the timeDomain due to timestamp adjustment
+      // Check if we have data that should be visible but was filtered out
+      if (filteredData.length > 0 && dataTimeRange) {
+        const hasDataAfterMidnight = data.some((d: any) => {
+          const t = d.time.getTime();
+          // Check if this is a point after midnight (more than 18 hours after start, or in early morning hours)
+          const hours = new Date(t).getUTCHours();
+          const isAfterMidnight = (hours >= 0 && hours <= 6) || (t > start + 18 * 3600 * 1000);
+          const wasFilteredOut = t < lo || t > hi;
+          return isAfterMidnight && wasFilteredOut;
+        });
+        
+        if (hasDataAfterMidnight) {
+          console.warn(`⚠️ AnalogChart [${id}] Data points after midnight were filtered out! Expanding filter range.`);
+          // Expand the filter range to include data after midnight
+          const expandedLo = Math.min(lo, dataTimeRange.first - 5 * 60 * 1000);
+          const expandedHi = Math.max(hi, dataTimeRange.last + 5 * 60 * 1000);
+          
+          const expandedFiltered = data
+            .filter((d: any) => {
+              const t = d.time.getTime();
+              return t >= expandedLo && t <= expandedHi;
+            })
+            .map(toPoint);
+          
+          if (expandedFiltered.length > filteredData.length) {
+            console.log(`✅ AnalogChart [${id}] Expanded filter recovered ${expandedFiltered.length - filteredData.length} additional points after midnight`);
+            return expandedFiltered;
+          }
+        }
       }
       
       return filteredData;
@@ -247,9 +341,14 @@ const AnalogChart: React.FC<AnalogChartProps> = ({
         const next = result[i + 1];
         const gap = next.time - current.time;
         
-        // If gap is larger than or equal to the threshold and both points have valid data, insert null point
-        // This breaks the line at missing time intervals
-        if (gap >= MAX_GAP && current.avg != null && next.avg != null) {
+        // For overnight shifts, we might have a large gap between last point before midnight
+        // and first point after midnight (which has 24 hours added). Don't break the line for this.
+        // Check if this gap is due to overnight shift adjustment (gap is close to 24 hours)
+        const isOvernightGap = gap > 20 * 3600 * 1000 && gap < 28 * 3600 * 1000; // 20-28 hour gap suggests overnight shift
+        
+        // If gap is larger than threshold and both points have valid data, insert null point
+        // BUT skip if it's an overnight shift gap (we want the line to connect across midnight)
+        if (gap >= MAX_GAP && current.avg != null && next.avg != null && !isOvernightGap) {
           // Insert a null point at the expected next interval time to break the line
           // This represents the first missing time point and ensures the line doesn't connect
           const nullPointTime = current.time + EXPECTED_INTERVAL;
@@ -264,6 +363,15 @@ const AnalogChart: React.FC<AnalogChartProps> = ({
             minToMaxBaseline: null,
             avgBase: null,
             minBase: null
+          });
+        } else if (isOvernightGap && current.avg != null && next.avg != null) {
+          // Log overnight gap to help debug
+          console.log(`🔍 AnalogChart [${id}] Overnight gap detected (not breaking line):`, {
+            currentTime: new Date(current.time).toISOString(),
+            nextTime: new Date(next.time).toISOString(),
+            gapHours: gap / (3600 * 1000),
+            currentAvg: current.avg,
+            nextAvg: next.avg
           });
         }
       }
@@ -513,30 +621,28 @@ const AnalogChart: React.FC<AnalogChartProps> = ({
       hasChartData: chartData.length > 0
     });
     
-    if (!chartData.length) {
-      console.warn(`⚠️ AnalogChart [${id}] chartData is empty! Cannot render chart.`);
-      // If no chart data, try to use timeDomain or fallback to dataMin/dataMax
-      if (timeDomain) {
+    // If we have an explicit timeDomain (from the scrubber selection / shift window),
+    // ALWAYS use it for the X-axis domain. Falling back to data range causes "18:00" to
+    // appear mid-chart and can show unlabeled time before the shift start.
+    if (timeDomain) {
+      const [start, end] = timeDomain;
+      if (Number.isFinite(start) && Number.isFinite(end) && start < end) {
         return timeDomain as [number, number];
       }
+    }
+
+    if (!chartData.length) {
+      console.warn(`⚠️ AnalogChart [${id}] chartData is empty! Cannot render chart.`);
       return ['dataMin', 'dataMax'] as const;
     }
+
     const dataMin = chartData[0].time;
     const dataMax = chartData[chartData.length - 1].time;
-    if (!timeDomain) {
-      console.log(`🔍 AnalogChart [${id}] No timeDomain, using data range:`, {
-        dataMin: new Date(dataMin).toISOString(),
-        dataMax: new Date(dataMax).toISOString()
-      });
-      return ['dataMin', 'dataMax'] as const;
-    }
-    const hasAny = chartData.some(d => d.time >= timeDomain[0] && d.time <= timeDomain[1]);
-    const result = hasAny ? (timeDomain as [number, number]) : ([dataMin, dataMax] as [number, number]);
-    console.log(`🔍 AnalogChart [${id}] xDomain result:`, {
-      hasAny,
-      result: result.map((t: number) => new Date(t).toISOString())
+    console.log(`🔍 AnalogChart [${id}] No valid timeDomain, using data range:`, {
+      dataMin: new Date(dataMin).toISOString(),
+      dataMax: new Date(dataMax).toISOString()
     });
-    return result;
+    return ['dataMin', 'dataMax'] as const;
   }, [chartData, timeDomain, id]);
 
   // Dynamic ticks based on data range: 30 minutes for 12 hours, 1 hour for 24 hours
@@ -589,12 +695,37 @@ const AnalogChart: React.FC<AnalogChartProps> = ({
     return () => window.removeEventListener('resize', update);
   }, []);
 
+  // Check if any modal is open
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  
+  useEffect(() => {
+    const checkModal = () => {
+      // Check if TimeRangeModal or any other modal overlay exists
+      const modalOverlays = document.querySelectorAll('[class*="modalOverlay"], [class*="modal-overlay"]');
+      setIsModalOpen(modalOverlays.length > 0);
+    };
+    
+    // Check initially and on any DOM changes
+    checkModal();
+    const observer = new MutationObserver(checkModal);
+    observer.observe(document.body, { childList: true, subtree: true });
+    
+    return () => observer.disconnect();
+  }, []);
+
   // Calculate ReferenceLine position for time label
   const referenceLineX = useMemo(() => {
+    // Hide time label when any modal is open
+    if (isModalOpen) return null;
+    
     if (!selectedTime || !timeDomain || !containerWidth) return null;
     
     const [visStart, visEnd] = timeDomain;
     const timeValue = selectedTime.getTime();
+    
+    // Only show label if time is within the visible domain
+    if (timeValue < visStart || timeValue > visEnd) return null;
+    
     const percent = (timeValue - visStart) / (visEnd - visStart);
     
     // Calculate left margin (same as chart)
@@ -606,7 +737,7 @@ const AnalogChart: React.FC<AnalogChartProps> = ({
     
     const x = chartLeftOffset + (innerWidth * Math.max(0, Math.min(1, percent)));
     return x;
-  }, [selectedTime, timeDomain, containerWidth]);
+  }, [selectedTime, timeDomain, containerWidth, isModalOpen]);
 
   // 🔍 DEBUG: Log final chartData before rendering
   React.useEffect(() => {
@@ -672,6 +803,9 @@ const AnalogChart: React.FC<AnalogChartProps> = ({
               scale="time"
               domain={xDomain as any}
               ticks={ticks as any}
+              allowDataOverflow={true}
+              interval={0}
+              minTickGap={0}
               tickFormatter={formatTime}
               stroke="#6b7280"
               tick={{ fill: '#6b7280', fontSize: 9 }}

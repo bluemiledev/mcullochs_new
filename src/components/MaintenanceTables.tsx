@@ -183,17 +183,20 @@ const MaintenanceTables: React.FC<MaintenanceTablesProps> = ({
 
   // Calculate current value based on range
   const getCurrentValue = (entry: { value: number; max: number }, unit: string, showUnit: boolean = false): string => {
-    // Use the value directly from API, ignore max
+    // Divide all values by 2
+    const halvedValue = entry.value / 2;
+    
+    // Use the halved value, ignore max
     // The value is already in minutes from the API
     let formattedValue: string;
     
     if (unit === 'HOURS') {
-      formattedValue = formatMinutesToHours(entry.value);
+      formattedValue = formatMinutesToHours(halvedValue);
     } else if (unit === 'METERS') {
-      // For distance, use value directly
-      formattedValue = `${Math.round(entry.value)}`;
+      // For distance, use halved value directly
+      formattedValue = `${Math.round(halvedValue)}`;
     } else {
-      formattedValue = `${Math.round(entry.value)}`;
+      formattedValue = `${Math.round(halvedValue)}`;
     }
     
     // Add unit in parentheses if showUnit is true
@@ -204,201 +207,173 @@ const MaintenanceTables: React.FC<MaintenanceTablesProps> = ({
     return formattedValue;
   };
 
+  // Helper function to render a table with two columns
+  const renderTwoColumnTable = (
+    entries: Array<[string, { value: number; max: number; unit: string }]>,
+    searchQuery: string,
+    showUnit: boolean = false
+  ) => {
+    // Split entries into two halves
+    const midpoint = Math.ceil(entries.length / 2);
+    const leftHalf = entries.slice(0, midpoint);
+    const rightHalf = entries.slice(midpoint);
+
+    return (
+      <div className={styles.twoColumnLayout}>
+        {/* Left Column */}
+        <div className={styles.column}>
+          <table className={styles.dataTable}>
+            <thead>
+              <tr>
+                <th className={styles.outputNameHeader}>Output Name</th>
+                <th className={styles.outputHeader}>Output</th>
+                <th className={styles.actionHeader}>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {leftHalf.map(([outputName, entry]) => (
+                <tr key={outputName}>
+                  <td className={styles.outputNameCell}>{outputName}</td>
+                  <td className={styles.outputCell}>
+                    {showUnit 
+                      ? getCurrentValue(entry, entry.unit, true)
+                      : `${getCurrentValue(entry, entry.unit, false)} (HOURS)`
+                    }
+                  </td>
+                  <td className={styles.actionCell}>
+                    <button 
+                      type="button"
+                      className={styles.viewButton}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        console.log('🔘 View button clicked for:', outputName);
+                        handleViewClick(outputName, entry);
+                      }}
+                    >
+                      View
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {/* Right Column */}
+        <div className={styles.column}>
+          <table className={styles.dataTable}>
+            <thead>
+              <tr>
+                <th className={styles.outputNameHeader}>Output Name</th>
+                <th className={styles.outputHeader}>Output</th>
+                <th className={styles.actionHeader}>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rightHalf.map(([outputName, entry]) => (
+                <tr key={`right-${outputName}`}>
+                  <td className={styles.outputNameCell}>{outputName}</td>
+                  <td className={styles.outputCell}>
+                    {showUnit 
+                      ? getCurrentValue(entry, entry.unit, true)
+                      : `${getCurrentValue(entry, entry.unit, false)} (HOURS)`
+                    }
+                  </td>
+                  <td className={styles.actionCell}>
+                    <button 
+                      type="button"
+                      className={styles.viewButton}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        console.log('🔘 View button clicked for:', outputName);
+                        handleViewClick(outputName, entry);
+                      }}
+                    >
+                      View
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div id="maintenanceTablesContainer" className={styles.maintenanceTablesContainer}>
       {/* Section 1: MAINTENANCE - REPORTING OUTPUTS */}
       <div className={styles.tableSection}>
         <div className={styles.tableHeader}>
           <h3 className={styles.tableTitle}>MAINTENANCE - REPORTING OUTPUTS</h3>
-          <div className={styles.tableActions}>
-            <input 
-              type="text" 
-              placeholder="Search..." 
-              className={styles.searchInput}
-              value={searchQuery1}
-              onChange={(e) => setSearchQuery1(e.target.value)}
-            />
-          </div>
         </div>
-        <table className={styles.dataTable}>
-          <thead>
-            <tr>
-              <th className={styles.outputNameHeader}>Output Name</th>
-              <th className={styles.outputHeader}>Output</th>
-              <th className={styles.actionHeader}>Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            {Object.entries(reportingOutputs)
-              .filter(([outputName]) => {
-                // Search filter
-                if (!matchesSearch(outputName, searchQuery1)) {
-                  return false;
-                }
-                // Visibility filter
-                // If no filters are applied (empty object), show all rows
-                if (Object.keys(visibleRows).length === 0) {
-                  return true;
-                }
-                // If filters are applied, only show rows where visibility is explicitly true
-                return visibleRows[outputName] === true;
-              })
-              .map(([outputName, entry]) => (
-                <tr key={outputName}>
-                  <td className={styles.outputNameCell}>{outputName}</td>
-                  <td className={styles.outputCell}>
-                    {getCurrentValue(entry, entry.unit, true)}
-                  </td>
-                  <td className={styles.actionCell}>
-                    <button 
-                      type="button"
-                      className={styles.viewButton}
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        console.log('🔘 View button clicked for:', outputName);
-                        handleViewClick(outputName, entry);
-                      }}
-                    >
-                      View
-                    </button>
-                  </td>
-                </tr>
-              ))}
-          </tbody>
-        </table>
+        {renderTwoColumnTable(
+          Object.entries(reportingOutputs).filter(([outputName]) => {
+            // Search filter
+            if (!matchesSearch(outputName, searchQuery1)) {
+              return false;
+            }
+            // Visibility filter
+            // If no filters are applied (empty object), show all rows
+            if (Object.keys(visibleRows).length === 0) {
+              return true;
+            }
+            // If filters are applied, only show rows where visibility is explicitly true
+            return visibleRows[outputName] === true;
+          }),
+          searchQuery1,
+          true
+        )}
       </div>
 
       {/* Section 2: MAINTENANCE - FAULT REPORTING OUTPUTS (ANALOG) */}
       <div className={styles.tableSection}>
         <div className={styles.tableHeader}>
           <h3 className={styles.tableTitle}>MAINTENANCE - FAULT REPORTING OUTPUTS (ANALOG)</h3>
-          <div className={styles.tableActions}>
-            <input 
-              type="text" 
-              placeholder="Search..." 
-              className={styles.searchInput}
-              value={searchQuery2}
-              onChange={(e) => setSearchQuery2(e.target.value)}
-            />
-          </div>
         </div>
-        <table className={styles.dataTable}>
-          <thead>
-            <tr>
-              <th className={styles.outputNameHeader}>Output Name</th>
-              <th className={styles.outputHeader}>Output</th>
-              <th className={styles.actionHeader}>Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            {Object.entries(faultReportingAnalog)
-              .filter(([outputName]) => {
-                // Search filter
-                if (!matchesSearch(outputName, searchQuery2)) {
-                  return false;
-                }
-                // Visibility filter
-                // If no filters are applied (empty object), show all rows
-                if (Object.keys(visibleRows).length === 0) {
-                  return true;
-                }
-                // If filters are applied, only show rows where visibility is explicitly true
-                return visibleRows[outputName] === true;
-              })
-              .map(([outputName, entry]) => (
-                <tr key={outputName}>
-                  <td className={styles.outputNameCell}>{outputName}</td>
-                  <td className={styles.outputCell}>
-                    {(() => {
-                      const value = getCurrentValue(entry, entry.unit, false);
-                      return `${value} (HOURS)`;
-                    })()}
-                  </td>
-                  <td className={styles.actionCell}>
-                    <button 
-                      type="button"
-                      className={styles.viewButton}
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        console.log('🔘 View button clicked for:', outputName);
-                        handleViewClick(outputName, entry);
-                      }}
-                    >
-                      View
-                    </button>
-                  </td>
-                </tr>
-              ))}
-          </tbody>
-        </table>
+        {renderTwoColumnTable(
+          Object.entries(faultReportingAnalog).filter(([outputName]) => {
+            // Search filter
+            if (!matchesSearch(outputName, searchQuery2)) {
+              return false;
+            }
+            // Visibility filter
+            // If no filters are applied (empty object), show all rows
+            if (Object.keys(visibleRows).length === 0) {
+              return true;
+            }
+            // If filters are applied, only show rows where visibility is explicitly true
+            return visibleRows[outputName] === true;
+          }),
+          searchQuery2,
+          false
+        )}
       </div>
 
       {/* Section 3: MAINTENANCE - FAULT REPORTING OUTPUTS (DIGITAL) */}
       <div className={styles.tableSection}>
         <div className={styles.tableHeader}>
           <h3 className={styles.tableTitle}>MAINTENANCE - FAULT REPORTING OUTPUTS (DIGITAL)</h3>
-          <div className={styles.tableActions}>
-            <input 
-              type="text" 
-              placeholder="Search..." 
-              className={styles.searchInput}
-              value={searchQuery3}
-              onChange={(e) => setSearchQuery3(e.target.value)}
-            />
-          </div>
         </div>
-        <table className={styles.dataTable}>
-          <thead>
-            <tr>
-              <th className={styles.outputNameHeader}>Output Name</th>
-              <th className={styles.outputHeader}>Output</th>
-              <th className={styles.actionHeader}>Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            {Object.entries(faultReportingDigital)
-              .filter(([outputName]) => {
-                // Search filter
-                if (!matchesSearch(outputName, searchQuery3)) {
-                  return false;
-                }
-                // Visibility filter
-                // If no filters are applied (empty object), show all rows
-                if (Object.keys(visibleRows).length === 0) {
-                  return true;
-                }
-                // If filters are applied, only show rows where visibility is explicitly true
-                return visibleRows[outputName] === true;
-              })
-              .map(([outputName, entry]) => (
-                <tr key={outputName}>
-                  <td className={styles.outputNameCell}>{outputName}</td>
-                  <td className={styles.outputCell}>
-                    {(() => {
-                      const value = getCurrentValue(entry, entry.unit, false);
-                      return `${value} (HOURS)`;
-                    })()}
-                  </td>
-                  <td className={styles.actionCell}>
-                    <button 
-                      type="button"
-                      className={styles.viewButton}
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        console.log('🔘 View button clicked for:', outputName);
-                        handleViewClick(outputName, entry);
-                      }}
-                    >
-                      View
-                    </button>
-                  </td>
-                </tr>
-              ))}
-          </tbody>
-        </table>
+        {renderTwoColumnTable(
+          Object.entries(faultReportingDigital).filter(([outputName]) => {
+            // Search filter
+            if (!matchesSearch(outputName, searchQuery3)) {
+              return false;
+            }
+            // Visibility filter
+            // If no filters are applied (empty object), show all rows
+            if (Object.keys(visibleRows).length === 0) {
+              return true;
+            }
+            // If filters are applied, only show rows where visibility is explicitly true
+            return visibleRows[outputName] === true;
+          }),
+          searchQuery3,
+          false
+        )}
       </div>
     </div>
   );

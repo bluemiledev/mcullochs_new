@@ -10,6 +10,7 @@ import {
 } from 'recharts';
 import { format } from 'date-fns';
 import styles from './TimeScrubber.module.css';
+import TimeRangeModal from './TimeRangeModal';
 
 interface TimeScrubberProps {
   data: Array<{ time: number }>;
@@ -22,6 +23,8 @@ interface TimeScrubberProps {
   onHover: (time: number | null) => void;
   isSecondViewMode?: boolean;
   showVehiclePointer?: boolean; // Show vehicle pointer (default: true for drilling, false for maintenance)
+  onTimeRangeSelect?: (startTime: string, endTime: string) => void; // Callback for time range selection from modal
+  shift?: string; // Shift string like "6 AM to 6 PM" or "18:00:00to06:00:00"
 }
 
 const BASE_LEFT_MARGIN = 20; // same as charts
@@ -42,7 +45,10 @@ const TimeScrubber: React.FC<TimeScrubberProps> = ({
   onHover,
   isSecondViewMode = false,
   showVehiclePointer = true,
+  onTimeRangeSelect,
+  shift,
 }) => {
+  const [showTimeRangeModal, setShowTimeRangeModal] = useState<boolean>(false);
   const scrubberData = useMemo(() => {
     return data.map(d => ({
       time: d.time,
@@ -476,6 +482,13 @@ const TimeScrubber: React.FC<TimeScrubberProps> = ({
     window.addEventListener('mouseup', onUp);
   };
 
+  const handleTimeRangeSubmit = useCallback((startTime: string, endTime: string) => {
+    setShowTimeRangeModal(false);
+    if (onTimeRangeSelect) {
+      onTimeRangeSelect(startTime, endTime);
+    }
+  }, [onTimeRangeSelect]);
+
   return (
     <div className={styles.scrubberContainer}>
       <div className={styles.scrubberHeader}>
@@ -492,7 +505,8 @@ const TimeScrubber: React.FC<TimeScrubberProps> = ({
                   return `${hours}:${minutes}:${seconds}`;
                 })()}
               </span>
-              <span> → </span>
+              {/* <span> → </span> */}
+              <span> -</span>
               <span>
                 {(() => {
                   const date = new Date(selectionEnd);
@@ -504,8 +518,23 @@ const TimeScrubber: React.FC<TimeScrubberProps> = ({
               </span>
             </>
           )}
+          <button
+            type="button"
+            onClick={() => setShowTimeRangeModal(true)}
+            className={styles.selectRangeButton}
+          >
+            Select Range
+          </button>
         </div>
       </div>
+      <TimeRangeModal
+        isOpen={showTimeRangeModal}
+        onClose={() => setShowTimeRangeModal(false)}
+        onSubmit={handleTimeRangeSubmit}
+        currentStartTime={selectionStart ? new Date(selectionStart) : null}
+        currentEndTime={selectionEnd ? new Date(selectionEnd) : null}
+        shift={shift}
+      />
       <div className={styles.chartWrapper}>
         <ResponsiveContainer width="100%" height={56}>
           <AreaChart

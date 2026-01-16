@@ -221,9 +221,43 @@ const DigitalSignalTimeline: React.FC<DigitalSignalTimelineProps> = ({
     };
   }, [chartHeight]); // Re-run when chartHeight changes
 
+  // Check if any modal is open
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  
+  useEffect(() => {
+    const checkModal = () => {
+      // Check if TimeRangeModal or any other modal overlay exists
+      const modalOverlays = document.querySelectorAll('[class*="modalOverlay"], [class*="modal-overlay"]');
+      setIsModalOpen(modalOverlays.length > 0);
+    };
+    
+    // Check initially and on any DOM changes
+    checkModal();
+    const observer = new MutationObserver(checkModal);
+    observer.observe(document.body, { childList: true, subtree: true });
+    
+    return () => observer.disconnect();
+  }, []);
+
   // Track ReferenceLine position in viewport for fixed label
   useEffect(() => {
-    if (!selectedTime || !chartWrapperRef.current) {
+    // Hide time label when any modal is open
+    if (isModalOpen) {
+      setReferenceLineViewportX(null);
+      setIsChartVisible(false);
+      return;
+    }
+    
+    if (!selectedTime || !chartWrapperRef.current || !timeDomain) {
+      setReferenceLineViewportX(null);
+      setIsChartVisible(false);
+      return;
+    }
+    
+    // Only show label if time is within the visible domain
+    const timeValue = selectedTime.getTime();
+    const [visStart, visEnd] = timeDomain;
+    if (timeValue < visStart || timeValue > visEnd) {
       setReferenceLineViewportX(null);
       setIsChartVisible(false);
       return;
@@ -398,7 +432,7 @@ const DigitalSignalTimeline: React.FC<DigitalSignalTimelineProps> = ({
   return (
     <>
       {/* Fixed time label at top of visible area when chart is visible and scrolled */}
-      {selectedTime && isChartVisible && referenceLineViewportX !== null && (
+      {!isModalOpen && selectedTime && isChartVisible && referenceLineViewportX !== null && (
         <div
           className={styles.fixedTimeLabel}
           style={{ 
@@ -434,6 +468,9 @@ const DigitalSignalTimeline: React.FC<DigitalSignalTimelineProps> = ({
                   scale="time"
                   domain={timeDomain || ['dataMin', 'dataMax']}
                   ticks={ticks as any}
+                  allowDataOverflow={true}
+                  interval={0}
+                  minTickGap={0}
                   tickFormatter={formatTime}
                   stroke="#6b7280"
                   tick={{ fill: '#6b7280', fontSize: 9 }}

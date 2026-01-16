@@ -71,10 +71,14 @@ const formatSecondsToHms = (sec: number): string => {
   return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`;
 };
 
-const formatDateUtcToHms = (date: Date): string => {
+const formatDateUtcToHms = (date: Date, baseDate?: string): string => {
   const hours = String(date.getUTCHours()).padStart(2, '0');
   const minutes = String(date.getUTCMinutes()).padStart(2, '0');
   const seconds = String(date.getUTCSeconds()).padStart(2, '0');
+  
+  // For overnight shifts, if the date represents the next day but we want to show it as part of present day,
+  // we need to check if the time is in the early morning hours (00:00:00 to 06:00:00) and the base date is provided
+  // In that case, we just return the time as-is since the API should handle it based on the date parameter
   return `${hours}:${minutes}:${seconds}`;
 };
 
@@ -134,6 +138,45 @@ const parseDateToUtcDayStartMs = (dateStr: string): number | null => {
     }
   }
   return null;
+};
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+const getUtcDayStartMsFromMs = (ms: number): number => {
+  const d = new Date(ms);
+  d.setUTCHours(0, 0, 0, 0);
+  return d.getTime();
+};
+
+const formatUtcDayStartMsLike = (dayStartMs: number, like?: string): string => {
+  const d = new Date(dayStartMs);
+  const yyyy = String(d.getUTCFullYear());
+  const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(d.getUTCDate()).padStart(2, '0');
+  const sample = String(like || '').trim();
+
+  // Preserve the incoming format when possible
+  if (/^\d{2}\/\d{2}\/\d{4}$/.test(sample)) return `${dd}/${mm}/${yyyy}`;
+  if (/^\d{2}-\d{2}-\d{4}$/.test(sample)) return `${dd}-${mm}-${yyyy}`;
+
+  // Default: YYYY-MM-DD
+  return `${yyyy}-${mm}-${dd}`;
+};
+
+const getShiftMeta = (selectedDate: string, selectedShift: string) => {
+  const shiftApi = formatShiftForAPI(selectedShift);
+  const { startSec, endSec } = parseShiftApiToSeconds(shiftApi);
+  const crossesMidnight = endSec > 24 * 3600;
+  const normalizedEndSec = crossesMidnight ? endSec - 24 * 3600 : endSec;
+
+  const selectedDayStartMs = parseDateToUtcDayStartMs(selectedDate);
+
+  // IMPORTANT: For overnight shifts, treat the selected date as the "shift end date".
+  // That means the shift timeline base day is the previous calendar day.
+  const timelineBaseDayStartMs =
+    selectedDayStartMs == null ? null : crossesMidnight ? selectedDayStartMs - DAY_MS : selectedDayStartMs;
+
+  return { shiftApi, startSec, endSec, crossesMidnight, normalizedEndSec, selectedDayStartMs, timelineBaseDayStartMs };
 };
 
 const VehicleDashboard: React.FC = () => {
@@ -806,10 +849,27 @@ useEffect(() => {
     const baseDate = new Date(selectedDate);
     baseDate.setHours(0, 0, 0, 0);
     
+    // Get shift info to handle overnight shifts
+    const shiftParamForApi = formatShiftForAPI(selectedShift);
+    const { startSec: shiftStartSec, endSec: shiftEndSec } = parseShiftApiToSeconds(shiftParamForApi);
+    const crossesMidnight = shiftEndSec > 24 * 3600;
+    const normalizedEndSec = crossesMidnight ? shiftEndSec - 24 * 3600 : shiftEndSec;
+    
     const parseHMS = (hms: string): Date => {
       const [hh, mm, ss] = hms.split(':').map(Number);
       const date = new Date(baseDate);
       date.setHours(hh, mm, ss, 0);
+      
+      // For overnight shifts, if time is in early morning (00:00:00 to normalizedEndSec),
+      // add 24 hours so it appears after 23:59:59 on the timeline
+      if (crossesMidnight) {
+        const timeInSeconds = hh * 3600 + mm * 60 + ss;
+        if (timeInSeconds <= normalizedEndSec) {
+          // This is in the early morning portion, add 24 hours for display
+          date.setTime(date.getTime() + 24 * 3600 * 1000);
+        }
+      }
+      
       return date;
     };
     
@@ -1114,27 +1174,48 @@ useEffect(() => {
         // Always send start_time/end_time:
         // - Initial load: full shift range (shift start to shift end)
         // - Range change: selected range from scrubber
-        const shiftParamForApi = formatShiftForAPI(selectedShift);
-        const { startSec: shiftStartSec, endSec: shiftEndSec } = parseShiftApiToSeconds(shiftParamForApi);
-        const startTimeStr = apiRange
-          ? formatDateUtcToHms(new Date(apiRange.startMs))
-          : formatSecondsToHms(shiftStartSec);
-        const endTimeStr = apiRange
-          ? formatDateUtcToHms(new Date(apiRange.endMs))
-          : formatSecondsToHms(shiftEndSec);
+        const shiftMeta = getShiftMeta(selectedDate, selectedShift);
+        const shiftParamForApi = shiftMeta.shiftApi;
+        const shiftStartSec = shiftMeta.startSec;
+        const shiftEndSec = shiftMeta.endSec;
+        
+        let startTimeStr: string;
+        let endTimeStr: string;
+        let apiDateForRequest = selectedDate;
+        
+        // Date semantics:
+        // - Full-shift loads use the shift "timeline base day" (previous day for overnight shifts)
+        // - Range loads use the UTC day of the selected range start
+        if (apiRange) {
+          const startDayMs = getUtcDayStartMsFromMs(apiRange.startMs);
+          apiDateForRequest = formatUtcDayStartMsLike(startDayMs, selectedDate);
+        } else if (shiftMeta.timelineBaseDayStartMs != null) {
+          apiDateForRequest = formatUtcDayStartMsLike(shiftMeta.timelineBaseDayStartMs, selectedDate);
+        }
+        
+        if (apiRange) {
+          const startDate = new Date(apiRange.startMs);
+          const endDate = new Date(apiRange.endMs);
+
+          startTimeStr = formatDateUtcToHms(startDate);
+          endTimeStr = formatDateUtcToHms(endDate);
+        } else {
+          startTimeStr = formatSecondsToHms(shiftStartSec);
+          endTimeStr = formatSecondsToHms(shiftEndSec > 24 * 3600 ? shiftEndSec - 24 * 3600 : shiftEndSec);
+        }
 
         let apiUrl: string;
         if (screenMode === 'Drilling') {
           // Use new drilling API with parameters
           // Use devices_serial_no (string) for API call
           const serialNo = selectedVehicleSerialNo || String(selectedVehicleId);
-          apiUrl = `/reet_python/mccullochs/apis/get_drilling_json.php?devices_serial_no=${encodeURIComponent(serialNo)}&date=${encodeURIComponent(selectedDate)}&shift=${encodeURIComponent(shiftParamForApi)}&start_time=${encodeURIComponent(startTimeStr)}&end_time=${encodeURIComponent(endTimeStr)}`;
+          apiUrl = `/reet_python/mccullochs/apis/get_drilling_json.php?devices_serial_no=${encodeURIComponent(serialNo)}&date=${encodeURIComponent(apiDateForRequest)}&shift=${encodeURIComponent(shiftParamForApi)}&start_time=${encodeURIComponent(startTimeStr)}&end_time=${encodeURIComponent(endTimeStr)}`;
           console.log(`📂 Loading ${screenMode} data from API:`, apiUrl);
         } else {
           // Maintenance mode - use new maintenance API with parameters
           // Use devices_serial_no (string) for API call
           const serialNo = selectedVehicleSerialNo || String(selectedVehicleId);
-          apiUrl = `/reet_python/mccullochs/apis/get_maintenance_json.php?devices_serial_no=${encodeURIComponent(serialNo)}&date=${encodeURIComponent(selectedDate)}&shift=${encodeURIComponent(shiftParamForApi)}&start_time=${encodeURIComponent(startTimeStr)}&end_time=${encodeURIComponent(endTimeStr)}`;
+          apiUrl = `/reet_python/mccullochs/apis/get_maintenance_json.php?devices_serial_no=${encodeURIComponent(serialNo)}&date=${encodeURIComponent(apiDateForRequest)}&shift=${encodeURIComponent(shiftParamForApi)}&start_time=${encodeURIComponent(startTimeStr)}&end_time=${encodeURIComponent(endTimeStr)}`;
           console.log(`📂 Loading ${screenMode} data from API:`, apiUrl);
         }
         
@@ -2443,11 +2524,44 @@ useEffect(() => {
           (payload.digitalPerSecond as Array<any>).length > 0 &&
           (bucketMs === 1000 || !digitalChart.metrics.length)
         ) {
-          const parseHMS = (hms: string) => {
-            const [hh, mm, ss] = String(hms).split(':').map((n: string) => Number(n));
+          // Get shift info to handle overnight shifts
+          const shiftParamForApi = formatShiftForAPI(selectedShift);
+          const { startSec: shiftStartSec, endSec: shiftEndSec } = parseShiftApiToSeconds(shiftParamForApi);
+          const crossesMidnight = shiftEndSec > 24 * 3600;
+          const normalizedEndSec = crossesMidnight ? shiftEndSec - 24 * 3600 : shiftEndSec;
+          
+          const timelineBaseDayStartMs = (() => {
+            const parsedDay = parseDateToUtcDayStartMs(selectedDate);
+            if (parsedDay != null) {
+              return crossesMidnight ? parsedDay - DAY_MS : parsedDay;
+            }
             const base = new Date((processedTimestamps[0] ?? times[0] ?? Date.now()));
             base.setUTCHours(0, 0, 0, 0);
-            const timestamp = base.getTime() + hh * 3600000 + mm * 60000 + ss * 1000;
+            return base.getTime();
+          })();
+
+          const parseHMS = (hms: string) => {
+            const [hh, mm, ss] = String(hms).split(':').map((n: string) => Number(n));
+            let timestamp = timelineBaseDayStartMs + hh * 3600000 + mm * 60000 + ss * 1000;
+            
+            // For overnight shifts, if time is in early morning (00:00:00 to normalizedEndSec),
+            // add 24 hours so it appears after 23:59:59 on the timeline
+            if (crossesMidnight) {
+              const timeInSeconds = hh * 3600 + mm * 60 + ss;
+              if (timeInSeconds <= normalizedEndSec) {
+                // This is in the early morning portion, add 24 hours for display
+                timestamp += 24 * 3600 * 1000;
+                // Debug log for first few early morning times
+                if (hh === 0 || hh === 1 || hh === 2 || hh === 3 || hh === 4 || hh === 5 || hh === 6) {
+                  console.log(`🔍 parseHMS (digital) overnight adjustment: "${hms}" -> ${new Date(timestamp).toISOString()} (added 24h)`, {
+                    input: hms,
+                    timeInSeconds,
+                    normalizedEndSec
+                  });
+                }
+              }
+            }
+            
             // Align to current bucket (second or minute)
             return new Date(alignToMinute(timestamp));
           };
@@ -2515,11 +2629,36 @@ useEffect(() => {
           if (bucketMs === 1000) {
             analogMetrics.length = 0;
           }
-          const parseHMS = (hms: string) => {
-            const [hh, mm, ss] = String(hms).split(':').map((n: string) => Number(n));
+          // Get shift info to handle overnight shifts
+          const shiftParamForApi2 = formatShiftForAPI(selectedShift);
+          const { startSec: shiftStartSec2, endSec: shiftEndSec2 } = parseShiftApiToSeconds(shiftParamForApi2);
+          const crossesMidnight2 = shiftEndSec2 > 24 * 3600;
+          const normalizedEndSec2 = crossesMidnight2 ? shiftEndSec2 - 24 * 3600 : shiftEndSec2;
+          
+          const timelineBaseDayStartMs = (() => {
+            const parsedDay = parseDateToUtcDayStartMs(selectedDate);
+            if (parsedDay != null) {
+              return crossesMidnight2 ? parsedDay - DAY_MS : parsedDay;
+            }
             const base = new Date((processedTimestamps[0] ?? times[0] ?? Date.now()));
             base.setUTCHours(0, 0, 0, 0);
-            const timestamp = base.getTime() + hh * 3600000 + mm * 60000 + ss * 1000;
+            return base.getTime();
+          })();
+
+          const parseHMS = (hms: string) => {
+            const [hh, mm, ss] = String(hms).split(':').map((n: string) => Number(n));
+            let timestamp = timelineBaseDayStartMs + hh * 3600000 + mm * 60000 + ss * 1000;
+            
+            // For overnight shifts, if time is in early morning (00:00:00 to normalizedEndSec),
+            // add 24 hours so it appears after 23:59:59 on the timeline
+            if (crossesMidnight2) {
+              const timeInSeconds = hh * 3600 + mm * 60 + ss;
+              if (timeInSeconds <= normalizedEndSec2) {
+                // This is in the early morning portion, add 24 hours for display
+                timestamp += 24 * 3600 * 1000;
+              }
+            }
+            
             // Align to current bucket (second or minute)
             return new Date(alignToMinute(timestamp));
           };
@@ -2647,16 +2786,40 @@ useEffect(() => {
           analogMetrics.length = 0;
           console.group('📊 Analog Per-Minute Data - API Response');
           console.log('Number of analog per-minute series:', (payload.analogPerMinute as Array<any>).length);
+          // Get shift info to handle overnight shifts
+          const shiftParamForApi3 = formatShiftForAPI(selectedShift);
+          const { startSec: shiftStartSec3, endSec: shiftEndSec3 } = parseShiftApiToSeconds(shiftParamForApi3);
+          const crossesMidnight3 = shiftEndSec3 > 24 * 3600;
+          const normalizedEndSec3 = crossesMidnight3 ? shiftEndSec3 - 24 * 3600 : shiftEndSec3;
+          
+          const timelineBaseDayStartMs = (() => {
+            const parsedDay = parseDateToUtcDayStartMs(selectedDate);
+            if (parsedDay != null) {
+              return crossesMidnight3 ? parsedDay - DAY_MS : parsedDay;
+            }
+            const base = new Date((times[0] ?? processedTimestamps[0] ?? rawTimestamps[0] ?? Date.now()));
+            base.setUTCHours(0, 0, 0, 0);
+            return base.getTime();
+          })();
+
           let parseHMSCallCount = 0;
           const parseHMS = (hms: string) => {
             const parts = String(hms).split(':');
             const hh = Number(parts[0] || 0);
             const mm = Number(parts[1] || 0);
             const ss = Number(parts[2] || 0);
-            // Use a base date derived from the actual data timestamps to avoid timezone drift
-            const base = new Date((times[0] ?? processedTimestamps[0] ?? rawTimestamps[0] ?? Date.now()));
-            base.setUTCHours(0, 0, 0, 0);
-            const timestamp = base.getTime() + hh * 3600000 + mm * 60000 + ss * 1000;
+            let timestamp = timelineBaseDayStartMs + hh * 3600000 + mm * 60000 + ss * 1000;
+            
+            // For overnight shifts, if time is in early morning (00:00:00 to normalizedEndSec),
+            // add 24 hours so it appears after 23:59:59 on the timeline
+            if (crossesMidnight3) {
+              const timeInSeconds = hh * 3600 + mm * 60 + ss;
+              if (timeInSeconds <= normalizedEndSec3) {
+                // This is in the early morning portion, add 24 hours for display
+                timestamp += 24 * 3600 * 1000;
+              }
+            }
+            
             // Align to minute boundary
             const result = new Date(alignToMinute(timestamp));
             
@@ -2666,9 +2829,11 @@ useEffect(() => {
               console.log(`🔍 parseHMS: "${hms}" -> ${result.toISOString()}`, {
                 input: hms,
                 parts: { hh, mm, ss },
-                baseDate: base.toISOString(),
+                baseDate: new Date(timelineBaseDayStartMs).toISOString(),
                 timestamp,
-                result: result.toISOString()
+                result: result.toISOString(),
+                crossesMidnight: crossesMidnight3,
+                normalizedEndSec: normalizedEndSec3
               });
             }
             
@@ -3040,20 +3205,27 @@ useEffect(() => {
         }
         // Set initial selection window: full shift range (e.g., 6 AM to 6 PM).
         // The API call uses a 1-hour centered window, but the scrubber shows the full shift.
-        const shiftApi = formatShiftForAPI(selectedShift);
-        const { startSec: shiftStartSec, endSec: shiftEndSec } = parseShiftApiToSeconds(shiftApi);
+        const shiftMetaForTimeline = getShiftMeta(selectedDate, selectedShift);
+        const shiftStartSec = shiftMetaForTimeline.startSec;
+        const shiftEndSec = shiftMetaForTimeline.endSec;
         const shiftCenterSec = Math.floor((shiftStartSec + shiftEndSec) / 2);
 
-        // Base day: prefer API timestamps (most reliable), otherwise parse selectedDate, otherwise today.
-        let baseDayMs: number | null = null;
-        const firstTs = processedTimestamps.length > 0 ? processedTimestamps[0] : (minCandidates.length ? Math.min(...minCandidates) : NaN);
-        if (Number.isFinite(firstTs)) {
-          const d = new Date(firstTs);
-          d.setUTCHours(0, 0, 0, 0);
-          baseDayMs = d.getTime();
-        } else {
-          baseDayMs = parseDateToUtcDayStartMs(selectedDate);
+        // Base day for the timeline: use selectedDate (and for overnight shifts, previous day).
+        let baseDayMs: number | null = shiftMetaForTimeline.timelineBaseDayStartMs;
+
+        // Fallback: if selectedDate isn't parseable, derive from actual API timestamps.
+        if (baseDayMs == null) {
+          const firstTs =
+            processedTimestamps.length > 0
+              ? processedTimestamps[0]
+              : (minCandidates.length ? Math.min(...minCandidates) : NaN);
+          if (Number.isFinite(firstTs)) {
+            const d = new Date(firstTs);
+            d.setUTCHours(0, 0, 0, 0);
+            baseDayMs = d.getTime();
+          }
         }
+
         if (baseDayMs == null) {
           const d = new Date();
           d.setUTCHours(0, 0, 0, 0);
@@ -3125,17 +3297,16 @@ useEffect(() => {
 
   // Prepare scrubber data - always use full shift domain (so user can expand selection up to the full shift)
   const scrubberData = useMemo(() => {
-    const shiftApi = formatShiftForAPI(selectedShift);
-    const { startSec: shiftStartSec, endSec: shiftEndSec } = parseShiftApiToSeconds(shiftApi);
+    const shiftMeta = getShiftMeta(selectedDate, selectedShift);
+    const shiftStartSec = shiftMeta.startSec;
+    const shiftEndSec = shiftMeta.endSec;
 
-    // Base day for the timeline: prefer API timestamps (most reliable), otherwise parse selectedDate, otherwise today.
-    let baseDayMs: number | null = null;
-    if (rawTimestamps.length > 0) {
+    // Base day for the timeline: always anchor from selectedDate (overnight shifts use the previous day).
+    let baseDayMs: number | null = shiftMeta.timelineBaseDayStartMs;
+    if (baseDayMs == null && rawTimestamps.length > 0) {
       const d = new Date(rawTimestamps[0]);
       d.setUTCHours(0, 0, 0, 0);
       baseDayMs = d.getTime();
-    } else {
-      baseDayMs = parseDateToUtcDayStartMs(selectedDate);
     }
     if (baseDayMs == null) {
       const d = new Date();
@@ -3156,7 +3327,84 @@ useEffect(() => {
   // Calculate synchronized time domain from selection range
   const timeDomain = useMemo<[number, number] | null>(() => {
     if (selectionStart && selectionEnd) {
-      return [selectionStart.getTime(), selectionEnd.getTime()];
+      // Get shift info to handle overnight shifts
+      const shiftParamForApi = formatShiftForAPI(selectedShift);
+      const { startSec: shiftStartSec, endSec: shiftEndSec } = parseShiftApiToSeconds(shiftParamForApi);
+      const crossesMidnight = shiftEndSec > 24 * 3600;
+      const normalizedEndSec = crossesMidnight ? shiftEndSec - 24 * 3600 : shiftEndSec;
+      
+      let startTs = selectionStart.getTime();
+      let endTs = selectionEnd.getTime();
+      
+      // For overnight shifts, adjust timestamps to match the adjusted data points
+      // Data points after midnight (00:00:00 to normalizedEndSec) have 24 hours added
+      // So we need to adjust the timeDomain to match
+      if (crossesMidnight) {
+        // Get the base day - use the EXACT same logic as parseHMS in data processing
+        // parseHMS uses: new Date((processedTimestamps[0] ?? times[0] ?? Date.now()))
+        // Since rawTimestamps is set from processedTimestamps, use rawTimestamps[0]
+        // This ensures we use the same base day that the data points use
+        let baseDayMs: number;
+        const shiftMetaForDomain = getShiftMeta(selectedDate, selectedShift);
+        if (shiftMetaForDomain.timelineBaseDayStartMs != null) {
+          baseDayMs = shiftMetaForDomain.timelineBaseDayStartMs;
+        } else if (rawTimestamps.length > 0) {
+          // Fallback: derive from first timestamp and set to midnight
+          const d = new Date(rawTimestamps[0]);
+          d.setUTCHours(0, 0, 0, 0);
+          baseDayMs = d.getTime();
+        } else {
+          // Fallback: use selectedDate or current date
+          baseDayMs = parseDateToUtcDayStartMs(selectedDate) || (() => {
+            const d = new Date();
+            d.setUTCHours(0, 0, 0, 0);
+            return d.getTime();
+          })();
+        }
+        
+        // Get time portion (hours:minutes:seconds) from the Date objects
+        const startHours = selectionStart.getUTCHours();
+        const startMinutes = selectionStart.getUTCMinutes();
+        const startSeconds = selectionStart.getUTCSeconds();
+        const startTimeInSeconds = startHours * 3600 + startMinutes * 60 + startSeconds;
+        
+        const endHours = selectionEnd.getUTCHours();
+        const endMinutes = selectionEnd.getUTCMinutes();
+        const endSeconds = selectionEnd.getUTCSeconds();
+        const endTimeInSeconds = endHours * 3600 + endMinutes * 60 + endSeconds;
+        
+        // Reconstruct timestamps on base day, then add 24 hours if in early morning portion
+        // This matches how parseHMS adjusts the data points
+        if (startTimeInSeconds <= normalizedEndSec) {
+          // Time is in early morning (00:00:00 to 06:00:00), add 24 hours to match data points
+          startTs = baseDayMs + (startTimeInSeconds + 24 * 3600) * 1000;
+        } else {
+          // Time is in first part of shift (18:00:00 to 23:59:59), use as-is
+          startTs = baseDayMs + startTimeInSeconds * 1000;
+        }
+        
+        if (endTimeInSeconds <= normalizedEndSec) {
+          // Time is in early morning (00:00:00 to 06:00:00), add 24 hours to match data points
+          endTs = baseDayMs + (endTimeInSeconds + 24 * 3600) * 1000;
+        } else {
+          // Time is in first part of shift (18:00:00 to 23:59:59), use as-is
+          endTs = baseDayMs + endTimeInSeconds * 1000;
+        }
+        
+        // Debug log for overnight shifts
+        console.log(`🔍 timeDomain overnight adjustment:`, {
+          baseDayMs: new Date(baseDayMs).toISOString(),
+          selectionStart: selectionStart.toISOString(),
+          selectionEnd: selectionEnd.toISOString(),
+          startTimeInSeconds,
+          endTimeInSeconds,
+          normalizedEndSec,
+          adjustedStartTs: new Date(startTs).toISOString(),
+          adjustedEndTs: new Date(endTs).toISOString()
+        });
+      }
+      
+      return [startTs, endTs];
     }
 
     // Fallback: compute union of available series
@@ -3182,7 +3430,7 @@ useEffect(() => {
     const first = Math.min(...candidateStarts);
     const last = Math.max(...candidateEnds);
     return [first, last];
-  }, [selectionStart, selectionEnd, vehicleMetrics, digitalStatusChart]);
+  }, [selectionStart, selectionEnd, vehicleMetrics, digitalStatusChart, selectedShift]);
 
   // Defer expensive chart updates while user is dragging/interacting with the scrubber.
   // This keeps the scrubber pointer/handles responsive.
@@ -3263,16 +3511,15 @@ useEffect(() => {
 
     // Clamp selection inside the full SHIFT domain (not just loaded timestamps),
     // so user can expand up to the full shift even if the loaded data window is smaller.
-    const shiftApi = formatShiftForAPI(selectedShift);
-    const { startSec: shiftStartSec, endSec: shiftEndSec } = parseShiftApiToSeconds(shiftApi);
+    const shiftMeta = getShiftMeta(selectedDate, selectedShift);
+    const shiftStartSec = shiftMeta.startSec;
+    const shiftEndSec = shiftMeta.endSec;
 
-    let baseDayMs: number | null = null;
-    if (rawTimestamps.length > 0) {
+    let baseDayMs: number | null = shiftMeta.timelineBaseDayStartMs;
+    if (baseDayMs == null && rawTimestamps.length > 0) {
       const d = new Date(rawTimestamps[0]);
       d.setUTCHours(0, 0, 0, 0);
       baseDayMs = d.getTime();
-      } else {
-      baseDayMs = parseDateToUtcDayStartMs(selectedDate);
     }
     if (baseDayMs == null) {
       const d = new Date();
@@ -3329,6 +3576,42 @@ useEffect(() => {
     setApiRange({ startMs, endMs });
   }, [normalizeRange]);
 
+  // Handle time range selection from modal
+  const handleTimeRangeSelect = useCallback((startTimeStr: string, endTimeStr: string) => {
+    if (!selectedDate) return;
+
+    // Parse the time strings (HH:MM:SS)
+    const [startH, startM, startS] = startTimeStr.split(':').map(Number);
+    const [endH, endM, endS] = endTimeStr.split(':').map(Number);
+
+    const shiftMeta = getShiftMeta(selectedDate, selectedShift);
+    const baseDayStartMs = shiftMeta.timelineBaseDayStartMs;
+    if (baseDayStartMs == null) return;
+
+    const startSeconds = startH * 3600 + startM * 60 + startS;
+    const endSeconds = endH * 3600 + endM * 60 + endS;
+
+    const mapToShiftTimestamp = (sec: number) => {
+      if (shiftMeta.crossesMidnight && sec <= shiftMeta.normalizedEndSec) {
+        return baseDayStartMs + (sec + 24 * 3600) * 1000;
+      }
+      return baseDayStartMs + sec * 1000;
+    };
+
+    const startMs = mapToShiftTimestamp(startSeconds);
+    const endMs = mapToShiftTimestamp(endSeconds);
+
+    // Normalize/clamp inside shift boundaries
+    const { startMs: normalizedStart, endMs: normalizedEnd } = normalizeRange(startMs, endMs);
+
+    setSelectionStart(new Date(normalizedStart));
+    setSelectionEnd(new Date(normalizedEnd));
+    setSelectedTime(new Date(Math.floor((normalizedStart + normalizedEnd) / 2)));
+
+    // Trigger API call by setting apiRange
+    setApiRange({ startMs: normalizedStart, endMs: normalizedEnd });
+  }, [selectedDate, selectedShift, normalizeRange, setSelectedTime]);
+
   // Handle hover from scrubber
   const handleHover = useCallback((_timestamp: number | null) => {
     // Intentionally no-op: keep pointer/red-line fixed unless knob is dragged
@@ -3377,6 +3660,8 @@ useEffect(() => {
             onHover={handleHover}
             isSecondViewMode={isSecondViewMode}
             showVehiclePointer={screenMode === 'Drilling'}
+            onTimeRangeSelect={handleTimeRangeSelect}
+            shift={selectedShift}
           />
         )}
       </div>

@@ -118,20 +118,23 @@ const DrillingOperationsTable: React.FC<DrillingOperationsTableProps> = ({
         }
       }
       
+      // Divide all values by 2
+      const halvedValueMinutes = currentValueMinutes / 2;
+      
       // Format output based on mode
       let outputValue: string;
       if (mode === 'Drilling') {
         // For drilling, format as HH:MM:SS (HOURS)
-        outputValue = `${formatMinutesToHours(currentValueMinutes)} (HOURS)`;
+        outputValue = `${formatMinutesToHours(halvedValueMinutes)} (HOURS)`;
       } else {
         // For maintenance, show as single value
-        outputValue = String(Math.round(currentValueMinutes));
+        outputValue = String(Math.round(halvedValueMinutes));
       }
       
       return {
         ...op,
         valueRange: outputValue,
-        currentValue: currentValueMinutes
+        currentValue: halvedValueMinutes
       };
     });
   }, [operations, tableData, selectionStart, selectionEnd, mode]);
@@ -140,60 +143,82 @@ const DrillingOperationsTable: React.FC<DrillingOperationsTableProps> = ({
     ? 'DRILLING - RIG OPERATIONS REPORTING OUTPUTS'
     : 'MAINTENANCE - REPORTING OUTPUTS';
 
+  // Filter operations based on search and visibility
+  const filteredOperations = operationsWithValues.filter((operation) => {
+    // Search filter
+    if (!matchesSearch(operation.outputName, searchQuery)) {
+      return false;
+    }
+    
+    // Visibility filter (for drilling mode)
+    if (mode === 'Drilling' && 'code' in operation) {
+      const code = (operation as any).code;
+      // If no filters are applied (empty object), show all rows
+      if (Object.keys(visibleRows).length === 0) {
+        return true;
+      }
+      // If filters are applied, check visibility
+      // Items set to true = visible, false/undefined = hidden
+      const isVisible = visibleRows[code];
+      if (isVisible === undefined) {
+        console.warn(`⚠️ Row code ${code} not found in visibleRows. Keys:`, Object.keys(visibleRows));
+      }
+      return isVisible === true;
+    }
+    return true;
+  });
+
+  // Split operations into two halves
+  const midpoint = Math.ceil(filteredOperations.length / 2);
+  const leftHalf = filteredOperations.slice(0, midpoint);
+  const rightHalf = filteredOperations.slice(midpoint);
+
   return (
     <div id="drillingOperationsTable" className={styles.tableContainer}>
       <div className={styles.tableHeader}>
         <h2 className={styles.tableTitle}>{tableTitle}</h2>
-        <div className={styles.tableActions}>
-          <input 
-            type="text" 
-            placeholder="Search..." 
-            className={styles.searchInput}
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-          />
+      
+      </div>
+      <div className={styles.twoColumnLayout}>
+        {/* Left Column */}
+        <div className={styles.column}>
+          <table className={styles.operationsTable}>
+            <thead>
+              <tr>
+                <th className={styles.outputNameHeader}>Output Name</th>
+                <th className={styles.valueRangeHeader}>Output</th>
+              </tr>
+            </thead>
+            <tbody>
+              {leftHalf.map((operation, index) => (
+                <tr key={index}>
+                  <td className={styles.outputName}>{operation.outputName}</td>
+                  <td className={styles.valueRange}>{operation.valueRange}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {/* Right Column */}
+        <div className={styles.column}>
+          <table className={styles.operationsTable}>
+            <thead>
+              <tr>
+                <th className={styles.outputNameHeader}>Output Name</th>
+                <th className={styles.valueRangeHeader}>Output</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rightHalf.map((operation, index) => (
+                <tr key={`right-${index}`}>
+                  <td className={styles.outputName}>{operation.outputName}</td>
+                  <td className={styles.valueRange}>{operation.valueRange}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </div>
-      <table className={styles.operationsTable}>
-        <thead>
-          <tr>
-            <th className={styles.outputNameHeader}>Output Name</th>
-            <th className={styles.valueRangeHeader}>Output</th>
-          </tr>
-        </thead>
-        <tbody>
-          {operationsWithValues
-            .filter((operation) => {
-              // Search filter
-              if (!matchesSearch(operation.outputName, searchQuery)) {
-                return false;
-              }
-              
-              // Visibility filter (for drilling mode)
-              if (mode === 'Drilling' && 'code' in operation) {
-                const code = (operation as any).code;
-                // If no filters are applied (empty object), show all rows
-                if (Object.keys(visibleRows).length === 0) {
-                  return true;
-                }
-                // If filters are applied, check visibility
-                // Items set to true = visible, false/undefined = hidden
-                const isVisible = visibleRows[code];
-                if (isVisible === undefined) {
-                  console.warn(`⚠️ Row code ${code} not found in visibleRows. Keys:`, Object.keys(visibleRows));
-                }
-                return isVisible === true;
-              }
-              return true;
-            })
-            .map((operation, index) => (
-              <tr key={index}>
-                <td className={styles.outputName}>{operation.outputName}</td>
-                <td className={styles.valueRange}>{operation.valueRange}</td>
-              </tr>
-            ))}
-        </tbody>
-      </table>
     </div>
   );
 };

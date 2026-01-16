@@ -69,10 +69,24 @@
   background-color: #1d4ed8;
 }
 
-.operationsTable {
+.twoColumnLayout {
+  display: flex;
+  padding: 0 167px;
+
   width: 100%;
+}
+
+.column {
+  flex: 1;
+  min-width: 0;
+}
+
+.operationsTable {
+  width: 90%;
+  /* max-width: 800px; */
   border-collapse: collapse;
   border: 1px solid #e5e7eb;
+  margin: 0 auto;
 }
 
 .operationsTable thead {
@@ -81,6 +95,7 @@
 
 .operationsTable th {
   padding: 4px 6px;
+  text-align: left;
   font-size: 10px;
   font-weight: 600;
   color: #374151;
@@ -92,11 +107,13 @@
 .outputNameHeader {
   width: 60%;
   text-align: left;
+  padding-right: 20px;
+  white-space: nowrap;
 }
 
 .valueRangeHeader {
-  width: 40%;
   text-align: center;
+  white-space: nowrap;
 }
 
 .operationsTable tbody tr {
@@ -112,17 +129,21 @@
   font-size: 11px;
   color: #1f2937;
   border: 1px solid #e5e7eb;
+  text-align: left;
 }
 
 .outputName {
   font-weight: 500;
   color: #374151;
+  text-align: left;
+  padding-right: 20px;
 }
 
 .valueRange {
   font-weight: 600;
   color: #059669;
   text-align: center;
+  white-space: nowrap;
 }
 
 @media (max-width: 768px) {
@@ -133,6 +154,11 @@
 
   .tableTitle {
     font-size: 16px;
+  }
+
+  .twoColumnLayout {
+    flex-direction: column;
+    gap: 16px;
   }
 
   .operationsTable {
