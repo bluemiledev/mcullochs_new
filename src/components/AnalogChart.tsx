@@ -171,6 +171,7 @@ const AnalogChart: React.FC<AnalogChartProps> = ({
           // Debug points that are close to the boundaries (especially after midnight)
           const isAfterMidnight = t > start + 18 * 3600 * 1000; // More than 18 hours after start (likely after midnight)
           if (!inRange && (data.indexOf(d) < 10 || isAfterMidnight)) {
+            // eslint-disable-next-line no-console
             console.log(`🔍 Point filtered out [${id}]:`, {
               time: d.time.toISOString(),
               timestamp: t,
@@ -188,6 +189,7 @@ const AnalogChart: React.FC<AnalogChartProps> = ({
           
           // Also log points that ARE in range but are after midnight (to verify they're included)
           if (inRange && isAfterMidnight && data.indexOf(d) < 5) {
+            // eslint-disable-next-line no-console
             console.log(`✅ Point INCLUDED after midnight [${id}]:`, {
               time: d.time.toISOString(),
               timestamp: t,
@@ -221,6 +223,7 @@ const AnalogChart: React.FC<AnalogChartProps> = ({
         return hours >= 0 && hours <= 6;
       });
       
+      // eslint-disable-next-line no-console
       console.log(`🔍 AnalogChart [${id}] Filtered result:`, {
         originalCount: data.length,
         filteredCount: filteredData.length,
@@ -252,7 +255,9 @@ const AnalogChart: React.FC<AnalogChartProps> = ({
       // 🔍 FIX: If filtering removed all data, fall back to showing all data
       // This can happen if timeDomain doesn't match the data timezone/range
       if (filteredData.length === 0 && data.length > 0) {
+        // eslint-disable-next-line no-console
         console.warn(`⚠️ AnalogChart [${id}] Filtering removed all ${data.length} data points! Falling back to showing all data.`);
+        // eslint-disable-next-line no-console
         console.warn(`⚠️ This suggests a timeDomain mismatch. TimeDomain: ${new Date(start).toISOString()} to ${new Date(end).toISOString()}, Data range: ${dataTimeRange?.firstISO} to ${dataTimeRange?.lastISO}`);
         // Return all data points instead of empty array
         return data.map(toPoint);
@@ -272,6 +277,7 @@ const AnalogChart: React.FC<AnalogChartProps> = ({
         });
         
         if (hasDataAfterMidnight) {
+          // eslint-disable-next-line no-console
           console.warn(`⚠️ AnalogChart [${id}] Data points after midnight were filtered out! Expanding filter range.`);
           // Expand the filter range to include data after midnight
           const expandedLo = Math.min(lo, dataTimeRange.first - 5 * 60 * 1000);
@@ -285,6 +291,7 @@ const AnalogChart: React.FC<AnalogChartProps> = ({
             .map(toPoint);
           
           if (expandedFiltered.length > filteredData.length) {
+            // eslint-disable-next-line no-console
             console.log(`✅ AnalogChart [${id}] Expanded filter recovered ${expandedFiltered.length - filteredData.length} additional points after midnight`);
             return expandedFiltered;
           }
@@ -368,6 +375,7 @@ const AnalogChart: React.FC<AnalogChartProps> = ({
           });
         } else if (isOvernightGap && current.avg != null && next.avg != null) {
           // Log overnight gap to help debug
+          // eslint-disable-next-line no-console
           console.log(`🔍 AnalogChart [${id}] Overnight gap detected (not breaking line):`, {
             currentTime: new Date(current.time).toISOString(),
             nextTime: new Date(next.time).toISOString(),
@@ -384,6 +392,7 @@ const AnalogChart: React.FC<AnalogChartProps> = ({
     
     // 🔍 DEBUG: Log chartData after processing
     const validAvgPoints = sortedData.filter(d => d.avg != null && Number.isFinite(d.avg)).length;
+    // eslint-disable-next-line no-console
     console.log(`🔍 AnalogChart [${id}] chartData after processing:`, {
       id,
       name,
@@ -414,7 +423,9 @@ const AnalogChart: React.FC<AnalogChartProps> = ({
     
     // 🔍 WARNING: If we have no valid avg points, the line won't render
     if (sortedData.length > 0 && validAvgPoints === 0) {
+      // eslint-disable-next-line no-console
       console.error(`❌ AnalogChart [${id}] WARNING: chartData has ${sortedData.length} points but NONE have valid avg values! Line will not render.`);
+      // eslint-disable-next-line no-console
       console.error(`❌ Sample points:`, sortedData.slice(0, 3));
     }
     
@@ -426,19 +437,24 @@ const AnalogChart: React.FC<AnalogChartProps> = ({
     if (min_color || max_color) {
       const maxPoints = chartData.filter((d: any) => d.maxArea != null && max_color).length;
       const minPoints = chartData.filter((d: any) => d.minToMaxArea != null && min_color).length;
+      // eslint-disable-next-line no-console
       console.log(`✅ AnalogChart ${id}: Shadow colors provided - min_color=${min_color}, max_color=${max_color}`);
+      // eslint-disable-next-line no-console
       console.log(`📊 AnalogChart ${id}: Shadow data points - max: ${maxPoints}, min: ${minPoints}`);
       if (maxPoints > 0 && max_color) {
+        // eslint-disable-next-line no-console
         console.log(`📊 AnalogChart ${id}: Sample max shadow data:`, 
           chartData.filter((d: any) => d.maxArea != null).slice(0, 2)
         );
       }
       if (minPoints > 0 && min_color) {
+        // eslint-disable-next-line no-console
         console.log(`📊 AnalogChart ${id}: Sample min shadow data:`, 
           chartData.filter((d: any) => d.minToMaxArea != null).slice(0, 2)
         );
       }
     } else {
+      // eslint-disable-next-line no-console
       console.log(`❌ AnalogChart ${id}: No min_color or max_color provided`);
     }
   }, [id, min_color, max_color, chartData]);
@@ -614,6 +630,7 @@ const AnalogChart: React.FC<AnalogChartProps> = ({
 
   const xDomain = useMemo(() => {
     // 🔍 DEBUG: Log xDomain calculation
+    // eslint-disable-next-line no-console
     console.log(`🔍 AnalogChart [${id}] xDomain calculation:`, {
       chartDataLength: chartData.length,
       timeDomain: timeDomain ? {
@@ -634,12 +651,14 @@ const AnalogChart: React.FC<AnalogChartProps> = ({
     }
 
     if (!chartData.length) {
+      // eslint-disable-next-line no-console
       console.warn(`⚠️ AnalogChart [${id}] chartData is empty! Cannot render chart.`);
       return ['dataMin', 'dataMax'] as const;
     }
 
     const dataMin = chartData[0].time;
     const dataMax = chartData[chartData.length - 1].time;
+    // eslint-disable-next-line no-console
     console.log(`🔍 AnalogChart [${id}] No valid timeDomain, using data range:`, {
       dataMin: new Date(dataMin).toISOString(),
       dataMax: new Date(dataMax).toISOString()
@@ -743,6 +762,7 @@ const AnalogChart: React.FC<AnalogChartProps> = ({
 
   // 🔍 DEBUG: Log final chartData before rendering
   React.useEffect(() => {
+    // eslint-disable-next-line no-console
     console.log(`🔍 AnalogChart [${id}] Final chartData before render:`, {
       chartDataLength: chartData.length,
       hasData: chartData.length > 0,
@@ -758,8 +778,10 @@ const AnalogChart: React.FC<AnalogChartProps> = ({
     });
     
     if (chartData.length === 0) {
+      // eslint-disable-next-line no-console
       console.error(`❌ AnalogChart [${id}] Cannot render - chartData is empty!`);
     } else if (chartData.filter(d => d.avg != null && Number.isFinite(d.avg)).length === 0) {
+      // eslint-disable-next-line no-console
       console.error(`❌ AnalogChart [${id}] Cannot render - no valid avg values in chartData!`);
     }
   }, [chartData, id, xDomain]);
