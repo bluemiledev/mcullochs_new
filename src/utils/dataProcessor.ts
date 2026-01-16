@@ -3,15 +3,83 @@
 
 import { processData as lttbDownsample } from 'downsample-lttb';
 
-// Cache for processed data
-let cachedProcessedData: {
-  analogMetrics: any[];
-  digitalMetrics: any[];
+// Type definitions
+interface DataPoint {
+  time: number;
+  avg: number | null;
+  min: number | null;
+  max: number | null;
+}
+
+interface DigitalPoint {
+  time: number;
+  value: number;
+}
+
+interface AnalogMetric {
+  id: string;
+  name: string;
+  unit: string;
+  color: string;
+  min_color?: string;
+  max_color?: string;
+  allPoints: DataPoint[];
+  currentValue: number;
+  avg: number;
+  min: number;
+  max: number;
+  yAxisRange: { min: number; max: number };
+  resolution: number;
+  offset: number;
+}
+
+interface DigitalMetric {
+  id: string;
+  name: string;
+  color: string;
+  allPoints: DigitalPoint[];
+  currentValue: number;
+}
+
+interface ProcessedData {
+  analogMetrics: AnalogMetric[];
+  digitalMetrics: DigitalMetric[];
+  gpsData: Array<{ time: number; lat: number; lng: number }>;
   timestamps: number[];
   baseDate: Date;
-} | null = null;
+}
 
-let cachedRawData: any = null;
+interface RawDataPoint {
+  time: string;
+  avg?: number | null;
+  min?: number | null;
+  max?: number | null;
+  value?: number | null;
+}
+
+interface RawSeries {
+  id: string | number;
+  name?: string;
+  unit?: string;
+  color?: string;
+  min_color?: string;
+  max_color?: string;
+  resolution?: number;
+  offset?: number;
+  yAxisRange?: { min: number; max: number };
+  display?: boolean;
+  points?: RawDataPoint[];
+}
+
+interface RawData {
+  analogPerSecond?: RawSeries[];
+  digitalPerSecond?: RawSeries[];
+}
+
+// Cache for processed data
+let cachedProcessedData: ProcessedData | null = null;
+
+let cachedRawData: RawData | null = null;
 let cachedSelectedDate: string = '';
 
 // Helper to parse time string to timestamp
@@ -35,14 +103,14 @@ const applyTransformation = (
 };
 
 // Process raw data into structured format
-export const processRawData = (rawData: any, selectedDate: string) => {
+export const processRawData = (rawData: RawData, selectedDate: string): ProcessedData => {
   const baseDate = new Date(selectedDate);
   baseDate.setHours(0, 0, 0, 0);
 
   // Process analog per-second data
-  const analogMetrics: any[] = [];
+  const analogMetrics: AnalogMetric[] = [];
   if (Array.isArray(rawData.analogPerSecond)) {
-    rawData.analogPerSecond.forEach((series: any) => {
+    rawData.analogPerSecond.forEach((series: RawSeries) => {
       if (series.display === false) return;
 
       const id = String(series.id);
@@ -50,7 +118,7 @@ export const processRawData = (rawData: any, selectedDate: string) => {
       const offset = Number(series.offset ?? 0);
 
       const points = (series.points || [])
-        .map((p: any) => {
+        .map((p: RawDataPoint): DataPoint => {
           const time = parseHMS(p.time, baseDate);
           const avg = applyTransformation(p.avg, resolution, offset);
           const min = applyTransformation(p.min, resolution, offset);
@@ -63,20 +131,20 @@ export const processRawData = (rawData: any, selectedDate: string) => {
             max: max != null && Number.isFinite(max) && !isNaN(max) ? max : null,
           };
         })
-        .filter((p: any) => p.time != null)
-        .sort((a: any, b: any) => a.time - b.time);
+        .filter((p: DataPoint) => p.time != null)
+        .sort((a: DataPoint, b: DataPoint) => a.time - b.time);
 
       if (points.length === 0) return;
 
       const values = points
-        .map((p: any) => p.avg)
-        .filter((v: any): v is number => v != null && Number.isFinite(v) && !isNaN(v));
+        .map((p: DataPoint) => p.avg)
+        .filter((v: number | null): v is number => v != null && Number.isFinite(v) && !isNaN(v));
       const allMins = points
-        .map((p: any) => p.min)
-        .filter((v: any): v is number => v != null && Number.isFinite(v) && !isNaN(v));
+        .map((p: DataPoint) => p.min)
+        .filter((v: number | null): v is number => v != null && Number.isFinite(v) && !isNaN(v));
       const allMaxs = points
-        .map((p: any) => p.max)
-        .filter((v: any): v is number => v != null && Number.isFinite(v) && !isNaN(v));
+        .map((p: DataPoint) => p.max)
+        .filter((v: number | null): v is number => v != null && Number.isFinite(v) && !isNaN(v));
 
       const minVal =
         allMins.length > 0
@@ -128,18 +196,18 @@ export const processRawData = (rawData: any, selectedDate: string) => {
   }
 
   // Process digital per-second data
-  const digitalMetrics: any[] = [];
+  const digitalMetrics: DigitalMetric[] = [];
   if (Array.isArray(rawData.digitalPerSecond)) {
     rawData.digitalPerSecond
-      .filter((series: any) => series.display !== false)
-      .forEach((series: any) => {
+      .filter((series: RawSeries) => series.display !== false)
+      .forEach((series: RawSeries) => {
         const points = (series.points || [])
-          .map((p: any) => ({
+          .map((p: RawDataPoint): DigitalPoint => ({
             time: parseHMS(p.time, baseDate),
             value: Number(p.value ?? 0),
           }))
-          .filter((p: any) => p.time != null)
-          .sort((a: any, b: any) => a.time - b.time);
+          .filter((p: DigitalPoint) => p.time != null)
+          .sort((a: DigitalPoint, b: DigitalPoint) => a.time - b.time);
 
         if (points.length === 0) return;
 
@@ -156,15 +224,27 @@ export const processRawData = (rawData: any, selectedDate: string) => {
   // Collect all timestamps
   const timestamps = new Set<number>();
   analogMetrics.forEach((m) => {
-    m.allPoints.forEach((p: any) => timestamps.add(p.time));
+    m.allPoints.forEach((p: DataPoint) => timestamps.add(p.time));
   });
   digitalMetrics.forEach((m) => {
-    m.allPoints.forEach((p: any) => timestamps.add(p.time));
+    m.allPoints.forEach((p: DigitalPoint) => timestamps.add(p.time));
   });
 
-  const result = {
+  // Process GPS data if available
+  const gpsData: Array<{ time: number; lat: number; lng: number }> = [];
+  if (Array.isArray((rawData as RawData & { gpsData?: Array<{ time: string; lat: number; lng: number }> }).gpsData)) {
+    const rawGpsData = (rawData as RawData & { gpsData?: Array<{ time: string; lat: number; lng: number }> }).gpsData || [];
+    rawGpsData.forEach((p) => {
+      const time = parseHMS(p.time, baseDate);
+      gpsData.push({ time, lat: p.lat, lng: p.lng });
+    });
+    gpsData.sort((a, b) => a.time - b.time);
+  }
+
+  const result: ProcessedData = {
     analogMetrics,
     digitalMetrics,
+    gpsData,
     timestamps: Array.from(timestamps).sort((a, b) => a - b),
     baseDate,
   };
@@ -241,11 +321,17 @@ export const getWindowedData = (
   windowStart: number,
   windowEnd: number,
   isSecondView: boolean
-): any => {
+): {
+  analogMetrics: Array<Omit<AnalogMetric, 'allPoints'> & { data: Array<{ time: Date; avg: number | null; min: number | null; max: number | null }> }>;
+  digitalMetrics: Array<Omit<DigitalMetric, 'allPoints'> & { data: Array<{ time: Date; value: number }> }>;
+  gpsData: Array<{ time: number; lat: number; lng: number }>;
+  timestamps: number[];
+} => {
   if (!cachedProcessedData) {
     return {
       analogMetrics: [],
       digitalMetrics: [],
+      gpsData: [],
       timestamps: [],
     };
   }
@@ -344,9 +430,15 @@ export const getWindowedData = (
     (t) => t >= paddedStart && t <= paddedEnd
   );
 
+  // Get windowed GPS data
+  const gpsData = cachedProcessedData.gpsData.filter(
+    (p) => p.time >= paddedStart && p.time <= paddedEnd
+  );
+
   return {
     analogMetrics,
     digitalMetrics,
+    gpsData,
     timestamps,
   };
 };
