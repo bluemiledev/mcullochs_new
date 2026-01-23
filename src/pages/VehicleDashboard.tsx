@@ -212,18 +212,18 @@ const VehicleDashboard: React.FC = () => {
   const [showFilters, setShowFilters] = useState<boolean>(false);
   const [forceAllChartsVisible, setForceAllChartsVisible] = useState<boolean>(false);
   const [selectedHourRange, setSelectedHourRange] = useState<{ start: string; end: string; label: string } | null>(null);
-  const [screenMode, setScreenMode] = useState<'Maintenance' | 'Drilling'>('Maintenance');
+  const [screenMode, setScreenMode] = useState<'Maintenance' | 'Drilling'>('Drilling');
   const [isSecondViewMode, setIsSecondViewMode] = useState<boolean>(false);
   const [apiRange, setApiRange] = useState<{ startMs: number; endMs: number } | null>(null);
-  const [tableData, setTableData] = useState<Record<string, { value: number; max: number }> | null>(null);
+  const [tableData, setTableData] = useState<Record<string, { valueStr: string; reading: string; id: string }> | null>(null);
   const [showDrillingFilters, setShowDrillingFilters] = useState<boolean>(false);
   const [visibleDownholeCharts, setVisibleDownholeCharts] = useState<Record<string, boolean>>({});
   const [visibleRigOpsRows, setVisibleRigOpsRows] = useState<Record<string, boolean>>({});
   const [visibleMaintenanceRows, setVisibleMaintenanceRows] = useState<Record<string, boolean>>({});
   const [maintenanceTablesData, setMaintenanceTablesData] = useState<{
-    reportingOutputs?: Record<string, { value: number; max: number; unit: string }>;
-    faultReportingAnalog?: Record<string, { value: number; max: number; unit: string }>;
-    faultReportingDigital?: Record<string, { value: number; max: number; unit: string }>;
+    reportingOutputs?: Record<string, { valueStr: string; reading: string; id: string }>;
+    faultReportingAnalog?: Record<string, { valueStr: string; reading: string; id: string }>;
+    faultReportingDigital?: Record<string, { valueStr: string; reading: string; id: string }>;
   } | null>(null);
   const [rawTimestamps, setRawTimestamps] = useState<number[]>([]); // Store raw timestamps from API for scrubber
   const { processData, getWindow, clearCache } = useDataProcessor();
@@ -657,7 +657,7 @@ useEffect(() => {
       const deviceId = e?.detail?.device_id; // Can be string (devices_serial_no) or number
       const date = e?.detail?.date;
       const shift = e?.detail?.shift || '6 AM to 6 PM';
-      const reportType = e?.detail?.reportType || 'Maintenance';
+      const reportType = e?.detail?.reportType || 'Drilling';
       
       if (deviceId && date) {
         // Convert to number for selectedVehicleId (backward compatibility)
@@ -685,7 +685,7 @@ useEffect(() => {
       const deviceId = e?.detail?.device_id;
       const date = String(e?.detail?.date || '');
       const shift = e?.detail?.shift || selectedShift || '6 AM to 6 PM';
-      const reportType = e?.detail?.reportType || screenMode || 'Maintenance';
+      const reportType = e?.detail?.reportType || screenMode || 'Drilling';
       
       console.log('📋 VehicleDashboard: Received filters:apply event:', {
         deviceId,
@@ -805,7 +805,7 @@ useEffect(() => {
   // Listen to screen mode change events (Maintenance/Drilling)
   useEffect(() => {
     const handleScreenModeChange = (e: any) => {
-      const mode = e?.detail?.mode || 'Maintenance';
+      const mode = e?.detail?.mode || 'Drilling';
       setScreenMode(mode);
       // Reset filter states when switching modes
       setShowFilters(false);
@@ -1255,8 +1255,9 @@ useEffect(() => {
           // Extract table data for maintenance mode
           if (screenMode === 'Maintenance') {
             // Helper function to convert array format to object format
-            const convertArrayToObject = (arr: any[]): Record<string, { value: number; max: number; unit: string }> => {
-              const result: Record<string, { value: number; max: number; unit: string }> = {};
+            // Preserves original value string and reading from API
+            const convertArrayToObject = (arr: any[]): Record<string, { valueStr: string; reading: string; id: string }> => {
+              const result: Record<string, { valueStr: string; reading: string; id: string }> = {};
               
               if (!Array.isArray(arr)) {
                 // Already an object, return as-is
@@ -1266,38 +1267,16 @@ useEffect(() => {
               arr.forEach((item: any) => {
                 const name = String(item.name || '');
                 const valueStr = String(item.value || '0:00:00');
-                const reading = String(item.reading || 'Hours').toUpperCase();
-                
-                // Parse value string (e.g., "5:00:00") to minutes
-                let valueMinutes = 0;
-                try {
-                  const parts = valueStr.split(':');
-                  if (parts.length >= 2) {
-                    const hours = parseInt(parts[0] || '0', 10);
-                    const minutes = parseInt(parts[1] || '0', 10);
-                    const seconds = parts.length > 2 ? parseInt(parts[2] || '0', 10) : 0;
-                    valueMinutes = hours * 60 + minutes + (seconds / 60);
-                  }
-                } catch (e) {
-                  console.warn('⚠️ Failed to parse maintenance value string:', valueStr, e);
-                  valueMinutes = 0;
-                }
-                
-                // Determine unit from reading field
-                let unit = 'HOURS';
-                if (reading.includes('METERS') || reading.includes('METER')) {
-                  unit = 'METERS';
-                } else if (reading.includes('HOURS') || reading.includes('HOUR')) {
-                  unit = 'HOURS';
-                }
+                const reading = String(item.reading || 'Hours');
+                const id = String(item.id || '');
                 
                 if (name) {
                   result[name] = {
-                    value: valueMinutes,
-                    max: 720, // Default max
-                    unit
+                    valueStr,
+                    reading,
+                    id
                   };
-                  console.log(`📊 Maintenance item: "${name}" = ${valueStr} (${valueMinutes} minutes, unit: ${unit})`);
+                  console.log(`📊 Maintenance item: "${name}" = ${valueStr} (${reading})`);
                 }
               });
               
@@ -1428,104 +1407,48 @@ useEffect(() => {
           analogPerMinute: json.analogPerMinute || []
         };
         
-        // Extract table data - handle both array format (new) and object format (old)
+        // Extract table data - preserve original value string and reading from API
         if (json.tableData) {
-          let processedTableData: Record<string, { value: number; max: number }> = {};
+          const processedTableData: Record<string, { valueStr: string; reading: string; id: string }> = {};
           
           if (Array.isArray(json.tableData)) {
-            // New format: array of objects with id, name, value (string), reading
+            // Array format: array of objects with id, name, value (string), reading
             console.log('✅ Processing tableData as array format:', json.tableData.length, 'items');
             json.tableData.forEach((item: any) => {
               const name = String(item.name || '');
               const valueStr = String(item.value || '0:00:00');
               const reading = String(item.reading || 'Hours');
+              const id = String(item.id || '');
               
-              // Parse value string (e.g., "5:00:00" or "9:00:00") to minutes
-              // Format: "H:MM:SS" or "HH:MM:SS"
-              let valueMinutes = 0;
-              try {
-                const parts = valueStr.split(':');
-                if (parts.length >= 2) {
-                  const hours = parseInt(parts[0] || '0', 10);
-                  const minutes = parseInt(parts[1] || '0', 10);
-                  const seconds = parts.length > 2 ? parseInt(parts[2] || '0', 10) : 0;
-                  valueMinutes = hours * 60 + minutes + (seconds / 60);
-                  console.log(`⏱️ Parsed "${valueStr}": ${hours}h ${minutes}m ${seconds}s = ${valueMinutes} minutes`);
-                } else {
-                  console.warn(`⚠️ Invalid time format: "${valueStr}"`);
-                }
-              } catch (e) {
-                console.warn('⚠️ Failed to parse value string:', valueStr, e);
-                valueMinutes = 0;
-              }
-              
-              // Use name as key, or construct key with ID if name doesn't match expected format
-              // The table expects keys like "DRILLING TIME (OD101)"
-              let key = name;
-              
-              // Map ID codes to expected format (PR001 -> OD101, etc.)
-              const idToOutputName: Record<string, string> = {
-                'PR001': 'DRILLING TIME (OD101)',
-                'PR002': 'CIRCULATING/SURVEY TIME (OD102)',
-                'PR003': 'ROD TRIPPING TIME (OD103)',
-                'PR004': 'IDLE TIME 1 (OD104)',
-                'PR005': 'IDLE TIME 2 (OD105)',
-                'PR006': 'AIRLIFTING (OD106)'
-              };
-              
-              // Map common name variations to expected format
-              const nameMapping: Record<string, string> = {
-                'DRILLNG TIME': 'DRILLING TIME (OD101)',
-                'DRILLING TIME': 'DRILLING TIME (OD101)',
-                'CIRCULATING/SURVEY TI': 'CIRCULATING/SURVEY TIME (OD102)',
-                'CIRCULATING/SURVEY TIME': 'CIRCULATING/SURVEY TIME (OD102)',
-                'ROD TRIPPING TIME': 'ROD TRIPPING TIME (OD103)',
-                'IDLE TIME 1': 'IDLE TIME 1 (OD104)',
-                'IDLE TIME 2': 'IDLE TIME 2 (OD105)',
-                'AIRLIFTING': 'AIRLIFTING (OD106)'
-              };
-              
-              // First try to use ID mapping (most reliable), then name mapping
-              const itemId = String(item.id || '').trim();
-              if (itemId && idToOutputName[itemId]) {
-                key = idToOutputName[itemId];
-                console.log(`✅ Mapped by ID: ${itemId} -> ${key}`);
-              } else {
-                const nameUpper = name.toUpperCase().trim();
-                // Try exact match first
-                if (nameMapping[nameUpper]) {
-                  key = nameMapping[nameUpper];
-                  console.log(`✅ Mapped by exact name: "${nameUpper}" -> ${key}`);
-                } else {
-                  // Try partial match (for truncated names like "CIRCULATING/SURVEY TI")
-                  const matchedKey = Object.keys(nameMapping).find(mapped => {
-                    const mappedUpper = mapped.toUpperCase();
-                    return nameUpper.includes(mappedUpper) || mappedUpper.includes(nameUpper);
-                  });
-                  if (matchedKey) {
-                    key = nameMapping[matchedKey];
-                    console.log(`✅ Mapped by partial name: "${nameUpper}" matches "${matchedKey}" -> ${key}`);
-                  } else {
-                    console.warn(`⚠️ Could not map name "${name}" (id: ${itemId}), using as-is`);
-                  }
-                }
-              }
+              // Use name directly from API as key
+              const key = name;
               
               processedTableData[key] = {
-                value: valueMinutes,
-                max: 720 // Default max (12 hours = 720 minutes)
+                valueStr,
+                reading,
+                id
               };
               
-              console.log(`📊 Table item: id=${itemId}, name="${name}" -> key="${key}", value="${valueStr}" = ${valueMinutes} minutes`);
+              console.log(`📊 Drilling table item: id=${id}, name="${name}", value="${valueStr}", reading="${reading}"`);
             });
           } else if (typeof json.tableData === 'object') {
-            // Old format: object with keys like "DRILLING TIME (OD101)": { value: number, max: number }
-            console.log('✅ Processing tableData as object format:', Object.keys(json.tableData).length, 'items');
-            processedTableData = json.tableData;
+            // Old format: convert if needed, but prefer array format
+            console.log('⚠️ tableData is object format, expected array format from API');
+            // Try to convert old format if it exists
+            Object.entries(json.tableData).forEach(([key, value]: [string, any]) => {
+              if (value && typeof value === 'object') {
+                // If old format has value as number, we can't preserve original string
+                // This should not happen with new API, but handle gracefully
+                processedTableData[key] = {
+                  valueStr: String(value.value || '0:00:00'),
+                  reading: String(value.reading || 'Hours'),
+                  id: String(value.id || '')
+                };
+              }
+            });
           }
           
           console.log('✅ Setting processed table data:', Object.keys(processedTableData));
-          console.log('✅ Processed table data values:', Object.entries(processedTableData).map(([k, v]) => `${k}: ${(v as any).value} minutes`));
           setTableData(processedTableData);
         } else {
           console.warn('⚠️ No tableData in API response');
@@ -1621,6 +1544,37 @@ useEffect(() => {
             }
           });
         }
+
+        // Build shift-aware (UTC) time parsing helpers.
+        // This is critical for overnight shifts (e.g. 18:00 -> 06:00) so that
+        // points after 00:00 are placed on the *next* day in the same shift timeline.
+        const shiftMetaForTimeline = getShiftMeta(selectedDate, selectedShift);
+        const crossesMidnightForTimeline = shiftMetaForTimeline.crossesMidnight;
+        const normalizedEndSecForTimeline = shiftMetaForTimeline.normalizedEndSec;
+        let timelineBaseDayStartMsForTimeline = shiftMetaForTimeline.timelineBaseDayStartMs;
+        if (timelineBaseDayStartMsForTimeline == null) {
+          const base = new Date(processedTimestamps[0] ?? Date.now());
+          base.setUTCHours(0, 0, 0, 0);
+          timelineBaseDayStartMsForTimeline = base.getTime();
+        }
+
+        const hmsToTimelineMs = (hms: string): number => {
+          const parts = String(hms || '00:00:00').split(':');
+          const hh = Number(parts[0] || 0);
+          const mm = Number(parts[1] || 0);
+          const ss = Number(parts[2] || 0);
+
+          const timeInSeconds = (hh * 3600) + (mm * 60) + ss;
+          let timestamp =
+            (timelineBaseDayStartMsForTimeline as number) +
+            (timeInSeconds * 1000);
+
+          if (crossesMidnightForTimeline && timeInSeconds <= normalizedEndSecForTimeline) {
+            timestamp += DAY_MS;
+          }
+
+          return timestamp;
+        };
         
         // Convert analogPerMinute to analogSignals format if needed
         // This conversion is needed because the rest of the code expects analogSignals format
@@ -1656,21 +1610,20 @@ useEffect(() => {
             const times: number[] = [];
             
             (series.points || []).forEach((point: any) => {
-              // Use timestamp from map if available, otherwise parse time string
-              let timestamp: number;
-              if (point.time && timeToTimestampMap.has(point.time)) {
-                timestamp = timeToTimestampMap.get(point.time)!;
-              } else {
-                // Fallback: parse time string
-                const parts = String(point.time || '00:00:00').split(':');
-                const hh = Number(parts[0] || 0);
-                const mm = Number(parts[1] || 0);
-                const ss = Number(parts[2] || 0);
-                // Use a base date derived from the actual data timestamps to avoid timezone drift
-                const baseDate = new Date(processedTimestamps[0] ?? Date.now());
-                baseDate.setUTCHours(hh, mm, ss, 0);
-                timestamp = baseDate.getTime();
+              // Use timestamp from map if available, otherwise derive from shift timeline.
+              // IMPORTANT: For overnight shifts, convert "00:xx" into next-day timestamps so
+              // they appear after 23:59:59 within the same selected shift.
+              const timeKey = String(point.time || '00:00:00');
+              const mapped = timeToTimestampMap.get(timeKey);
+              const timelineTs = hmsToTimelineMs(timeKey);
+              let timestamp = Number.isFinite(mapped as number) ? (mapped as number) : timelineTs;
+
+              // If the mapped timestamp is clearly on the wrong day (common with overnight shifts),
+              // prefer the shift-timeline timestamp so charts & scrubber share the same domain.
+              if (Number.isFinite(mapped as number) && Math.abs((mapped as number) - timelineTs) > 12 * 3600 * 1000) {
+                timestamp = timelineTs;
               }
+
               times.push(timestamp);
               
               // New drilling API often returns `value` (not `avg`). Treat value as avg when avg is missing.
@@ -1735,10 +1688,8 @@ useEffect(() => {
             const times: number[] = [];
             
             (series.points || []).forEach((point: any) => {
-              const [hh, mm] = (point.time || '00:00:00').split(':').map(Number);
-              const baseDate = new Date(selectedDate);
-              baseDate.setHours(hh, mm, 0, 0);
-              times.push(baseDate.getTime());
+              const timeKey = String(point.time || '00:00:00');
+              times.push(hmsToTimelineMs(timeKey));
               values.push(point.value != null ? point.value : 0);
             });
             
@@ -1758,11 +1709,8 @@ useEffect(() => {
             const times: number[] = [];
             
             (series.points || []).forEach((point: any) => {
-              const [hh, mm] = (point.time || '00:00:00').split(':').map(Number);
-              // Use a fixed date (2025-01-15) for the timeline (6 AM to 6 PM)
-              const baseDate = new Date('2025-01-15');
-              baseDate.setHours(hh, mm, 0, 0);
-              times.push(baseDate.getTime());
+              const timeKey = String(point.time || '00:00:00');
+              times.push(hmsToTimelineMs(timeKey));
               values.push(point.value != null ? point.value : 0);
             });
             
@@ -3815,18 +3763,11 @@ useEffect(() => {
         initialDownhole={visibleDownholeCharts}
         initialRigOps={visibleRigOpsRows}
         availableCharts={vehicleMetrics.map(m => ({ name: m.name, id: m.id }))}
-        availableTableRows={tableData ? Object.keys(tableData).map(key => {
-          // Extract OD code from key like "DRILLING TIME (OD101)" -> "OD101"
-          // The OD code is always at the end in parentheses like (OD101)
-          let code = key; // fallback
-          // Match pattern: (OD followed by digits) at the end
-          const odMatch = key.match(/\(OD\d+\)$/);
-          if (odMatch) {
-            // Extract OD101 from (OD101)
-            code = odMatch[0].substring(1, odMatch[0].length - 1);
-          }
-          console.log(`🔍 Extracting from "${key}": code="${code}"`);
-          return { name: key, code };
+        availableTableRows={tableData ? Object.entries(tableData).map(([name, entry]) => {
+          // Use the ID from the API entry as the code
+          const code = entry.id || name;
+          console.log(`🔍 Table row: name="${name}", id="${entry.id}", code="${code}"`);
+          return { name, code };
         }) : []}
       />
     )}

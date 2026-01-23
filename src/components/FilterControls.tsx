@@ -675,7 +675,7 @@ const FilterControls: React.FC = () => {
   const [selectedDate, setSelectedDate] = useState<string>('');
   const [showCalendar, setShowCalendar] = useState<boolean>(false);
   const calendarRef = useRef<HTMLDivElement>(null);
-  const [screenMode, setScreenMode] = useState<'Maintenance' | 'Drilling'>('Maintenance');
+  const [screenMode, setScreenMode] = useState<'Maintenance' | 'Drilling'>('Drilling');
   
   // Check if we're on the maintenance detail page
   const isMaintenanceDetailPage = location.pathname === '/maintenance-detail';
@@ -1150,8 +1150,8 @@ const FilterControls: React.FC = () => {
             onChange={(e) => handleScreenModeChange(e.target.value as 'Maintenance' | 'Drilling')}
             disabled={isMaintenanceDetailPage}
           >
-            <option value="Maintenance">Maintenance</option>
             {!isMaintenanceDetailPage && <option value="Drilling">Drilling</option>}
+            <option value="Maintenance">Maintenance</option>
           </select>
           
           <select 

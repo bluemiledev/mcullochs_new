@@ -21,7 +21,7 @@ const AssetSelectionModal: React.FC<AssetSelectionModalProps> = ({ onShowGraph }
   const [dates, setDates] = useState<string[]>([]);
   const [selectedDate, setSelectedDate] = useState<string>('');
   const [selectedShift, setSelectedShift] = useState<string>(staticShift);
-  const [selectedReportType, setSelectedReportType] = useState<'Maintenance' | 'Drilling'>('Maintenance');
+  const [selectedReportType, setSelectedReportType] = useState<'Maintenance' | 'Drilling'>('Drilling');
   const [error, setError] = useState<string>('');
   const [loadingVehicles, setLoadingVehicles] = useState<boolean>(true);
   const [loadingDates, setLoadingDates] = useState<boolean>(false);
@@ -313,8 +313,8 @@ const AssetSelectionModal: React.FC<AssetSelectionModalProps> = ({ onShowGraph }
             value={selectedReportType}
             onChange={(e) => setSelectedReportType(e.target.value as 'Maintenance' | 'Drilling')}
           >
-            <option value="Maintenance">Maintenance</option>
             <option value="Drilling">Drilling</option>
+            <option value="Maintenance">Maintenance</option>
           </select>
         </div>
 

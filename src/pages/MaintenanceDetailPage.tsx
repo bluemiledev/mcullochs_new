@@ -2,7 +2,6 @@ import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import FilterControls from '../components/FilterControls';
 import TimeScrubber from '../components/TimeScrubber';
-import { getMockInstances } from '../utils/mockMaintenanceData';
 import { formatShiftForAPI } from '../utils';
 import styles from './MaintenanceDetailPage.module.css';
 
@@ -20,7 +19,7 @@ const MaintenanceDetailPage: React.FC = () => {
   const [currentPage, setCurrentPage] = useState(1);
   
   // Get output name from URL params
-  const outputName = searchParams.get('outputName') || '';
+  const outputName = searchParams.get('outputName') || '';   
   const [instances, setInstances] = useState<Instance[]>([]);
   
   // Debug: Log when component mounts
@@ -150,8 +149,7 @@ const MaintenanceDetailPage: React.FC = () => {
 
     if (!deviceId || !date || !id || !name || !value) {
       console.warn('⚠️ Missing required parameters for API call:', { deviceId, date, id, name, value });
-      const mockData = getMockInstances(outputName);
-      setInstances(mockData);
+      setInstances([]);
       setCurrentPage(1);
       return;
     }
@@ -208,47 +206,58 @@ const MaintenanceDetailPage: React.FC = () => {
         throw new Error('Invalid JSON response from API');
       }
 
-      // Handle API response structure: { success: true, data: { data: [...], total_pages: 10, per_page: 5 } }
+      // Handle API response structure: { data: [...] } or { success: true, data: [...] }
       let dataArray: any[] = [];
 
-      if (json.success) {
-        if (json.data && json.data.data && Array.isArray(json.data.data)) {
-          dataArray = json.data.data;
-          console.log('✅ Found paginated data structure:', {
-            total_pages: json.data.total_pages,
-            per_page: json.data.per_page,
-            items: dataArray.length
-          });
-        } else if (Array.isArray(json.data)) {
-          dataArray = json.data;
-          console.log('✅ Found direct array in json.data');
-        } else if (Array.isArray(json)) {
-          dataArray = json;
-          console.log('✅ Found direct array');
+      // Check for success wrapper first
+      if (json.success !== undefined) {
+        if (json.success && json.data) {
+          // Handle { success: true, data: [...] } or { success: true, data: { data: [...] } }
+          if (Array.isArray(json.data)) {
+            dataArray = json.data;
+            console.log('✅ Found array in json.data (success wrapper)');
+          } else if (json.data.data && Array.isArray(json.data.data)) {
+            dataArray = json.data.data;
+            console.log('✅ Found paginated data structure:', {
+              total_pages: json.data.total_pages,
+              per_page: json.data.per_page,
+              items: dataArray.length
+            });
+          }
         } else {
-          console.warn('⚠️ API response format unexpected:', json);
-          console.warn('⚠️ Expected array in json.data.data, json.data, or json itself');
+          console.warn('⚠️ API response indicates failure:', json);
           setInstances([]);
           return;
         }
-
-        const apiInstances: Instance[] = dataArray.map((item: any) => ({
-          time: String(item.time || ''),
-          value: Number(item.value || 0),
-          matched: Boolean(item.matched)
-        }));
-
-        setInstances(apiInstances);
-        setCurrentPage(1); // Reset to first page
-        console.log('✅ Loaded', apiInstances.length, 'instances from API');
+      } else if (Array.isArray(json.data)) {
+        // Handle { data: [...] } format directly
+        dataArray = json.data;
+        console.log('✅ Found array in json.data');
+      } else if (Array.isArray(json)) {
+        // Handle direct array format
+        dataArray = json;
+        console.log('✅ Found direct array');
       } else {
-        console.warn('⚠️ API response indicates failure:', json);
+        console.warn('⚠️ API response format unexpected:', json);
+        console.warn('⚠️ Expected array in json.data, json.data.data, or json itself');
         setInstances([]);
+        return;
       }
+
+      // Map API data directly - use time and value as-is from API
+      const apiInstances: Instance[] = dataArray.map((item: any) => ({
+        time: String(item.time || ''),
+        value: Number(item.value || 0),
+        matched: item.matched !== undefined ? Boolean(item.matched) : undefined
+      }));
+
+      setInstances(apiInstances);
+      setCurrentPage(1); // Reset to first page
+      console.log('✅ Loaded', apiInstances.length, 'instances from API');
     } catch (error: any) {
       console.error('❌ Error loading maintenance detail data:', error);
-      const mockData = getMockInstances(outputName);
-      setInstances(mockData);
+      // Show empty state instead of mock data
+      setInstances([]);
       setCurrentPage(1);
     }
   }, [outputName, deviceId, date, shift, id, name, value, reading]);
@@ -318,7 +327,7 @@ const MaintenanceDetailPage: React.FC = () => {
     let endMs = Math.max(startTimestamp, endTimestamp);
 
     // Clamp to full-shift domain
-    const domainStart = shiftDomain.startMs;
+    const domainStart = shiftDomain.startMs;    
     const domainEnd = shiftDomain.endMs;
     if (Number.isFinite(domainStart) && Number.isFinite(domainEnd) && domainStart < domainEnd) {
       startMs = Math.max(domainStart, startMs);
